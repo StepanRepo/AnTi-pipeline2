@@ -226,12 +226,11 @@ void Profile::dedisperse_coherent(double DM)
 	fftw_plan p;
 
 	fft_arr = static_cast<fftw_complex*>(fftw_malloc(sizeof(fftw_complex) * (2 * nchann + 1)));
-	p = fftw_plan_dft_1d(2*nchann, fft_arr, fft_arr, FFTW_BACKWARD, FFTW_PATIENT);
+	p = fftw_plan_dft_1d(nchann, fft_arr, fft_arr, FFTW_BACKWARD, FFTW_PATIENT);
 
 
 	fill_1d(pre, nchann);
 
-	double re, im;
 	for (size_t i = 0; i < obs_window; ++i)
 	{
 		fft_arr[0][0] = 0.0; 
@@ -254,11 +253,8 @@ void Profile::dedisperse_coherent(double DM)
 #pragma omp simd
 		for (size_t k = 0; k < nchann; ++k)
 		{
-			re = fft_arr[k][0];
-			im = fft_arr[k][1];
-
-			fft_arr[k][0] = re * dphase[k][0] - im * dphase[k][1];
-			fft_arr[k][1] = re * dphase[k][1] + im * dphase[k][1];
+			fft_arr[k][0] = fft_arr[k][0] * dphase[k][0] - fft_arr[k][1] * dphase[k][1];
+			fft_arr[k][1] = fft_arr[k][0] * dphase[k][1] + fft_arr[k][0] * dphase[k][1];
 		}
 
 		// apply conjugated phase correction
@@ -267,20 +263,17 @@ void Profile::dedisperse_coherent(double DM)
 		for (size_t k = 0; k < nchann; ++k)
 		{
 			arg = 2*nchann - 1;
-
-			re = fft_arr[arg][0];
-			im = fft_arr[arg][1];
-
-			fft_arr[arg][0] = re * dphase[arg][0] + im * dphase[arg][1];
-			fft_arr[arg][1] = -re * dphase[arg][1] + im * dphase[arg][0];
+			fft_arr[arg][0] = fft_arr[arg][0] * dphase[arg][0] + fft_arr[arg][1] * dphase[arg][1];
+			fft_arr[arg][1] = -fft_arr[arg][0] * dphase[arg][1] + fft_arr[arg][1] * dphase[arg][0];
 		}
 
 		fftw_execute(p);
 
+		double re, im;
 		for (size_t k = 0; k < nchann; ++k)
 		{
-			re = fft_arr[k+1][0];
-			im = fft_arr[k+1][1];
+			re = fft_arr[k][0];
+			im = fft_arr[k][1];
 
 			sum[i*nchann + k] = re*re + im*im;
 		}

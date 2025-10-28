@@ -11,8 +11,7 @@
 int main() 
 {
 
-	//std::string filename = "Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif";
-	std::string filename = "rup106_bd_321-1252_ch07.vdif";
+	std::string filename = "Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif";
 	std::string format = "IAA_vdif";
 
 	Profile profile(filename, format); 

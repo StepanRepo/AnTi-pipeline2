@@ -269,7 +269,7 @@ IAA_vdif::IAA_vdif(const std::string& filename_in, size_t buffer_size):
 		file.seekg(0, std::ios::beg); // Move the read pointer to the beginning of the file
 
 		// Set the corresponding header field
-		header.OBS_SIZE = tot * 8U / header.bits_per_sample;
+		header.OBS_SIZE = tot / header.frame_length * header.n_samples;
 
 		if (header.legacy_mode)
 		{
