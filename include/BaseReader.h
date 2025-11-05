@@ -42,9 +42,11 @@ class BaseReader
 		virtual ~BaseReader() = default;
 
 		// Pure virtual methods — must be implemented by derived classes
-		virtual void fill_2d(std::vector<double>& dyn_spec, size_t freq_num) = 0;
-		virtual void fill_1d(std::vector<std::complex<double>>& dyn_spec, size_t freq_num) = 0;
+		virtual size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num) = 0;
+		virtual void fill_1d(fftw_complex* vec, size_t n) = 0;
+
 		virtual double point2time(size_t point) = 0;
+		virtual void skip(double sec) = 0;
 
 };
 

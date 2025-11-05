@@ -13,17 +13,18 @@ CXX = g++
 # -fopenmp: Enable to use OpenMP routines
 CXXFLAGS = -Wall -Wextra -std=c++17 -O2 -g -fopenmp -march=native
 
-# Locally installed libs
-CXXFLAGS += -I./libs/include -L./libs/lib64 
 
 # Include directories (paths where the compiler looks for header files)
 # The -I flag tells the compiler where to find #include files
-INCLUDES = -I./include
+INCLUDES = -I./include -I./libs/include -I$(HOME)/miniconda3/envs/ent15y/include -I./jpl_eph
 
 # Library flags (paths where the linker looks for libraries and the libraries themselves)
 # -L flag for library paths, -l flag for library names
 # Example: -L/path/to/lib -lfftw3
-LIBS = -lfftw3 -lyaml-cpp
+LIBS = -lfftw3 -lyaml-cpp -ltempo2pred -ljpl
+LIBS += -L$(HOME)/miniconda3/envs/ent15y/lib -L./libs/lib64 -L./jpl_eph
+
+RPATHS = -Wl,-rpath,$(HOME)/miniconda3/envs/ent15y/lib 
 
 # --- Source and Build Directories ---
 SRCDIR = src
@@ -32,6 +33,7 @@ BUILDDIR = build
 
 # Find all source files (.cpp) in the src directory
 SOURCES = $(wildcard $(SRCDIR)/*.cpp)
+SOURCES += $(wildcard $(SRCDIR)/*.C)
 
 # --- Object Files ---
 # Generate the list of object file names from source file names
@@ -41,6 +43,7 @@ SOURCES = $(wildcard $(SRCDIR)/*.cpp)
 OBJ_NAMES = $(notdir $(SOURCES:.cpp=.o))
 OBJECTS = $(addprefix $(BUILDDIR)/obj/,$(OBJ_NAMES))
 
+
 # --- Default Target ---
 # The first target in the Makefile is the default one executed when 'make' is run
 all: $(TARGET)
@@ -49,7 +52,7 @@ all: $(TARGET)
 # This rule tells make how to create the final executable $(TARGET)
 # It depends on all the object files $(OBJECTS)
 $(TARGET): $(OBJECTS)
-	$(CXX) $(CXXFLAGS) $(LIBS) $(OBJECTS) -o $@ 
+	$(CXX) $(CXXFLAGS) $(RPATHS) $(OBJECTS) $(LIBS)  -o $@ 
 
 # --- Compilation Rule (Pattern Rule) ---
 # This pattern rule tells make how to compile any .cpp file into a .o file
@@ -57,6 +60,10 @@ $(TARGET): $(OBJECTS)
 # $@ is the target (the .o file)
 # The $(CXXFLAGS) and $(INCLUDES) are used for compilation
 $(BUILDDIR)/obj/%.o: $(SRCDIR)/%.cpp
+	@mkdir -p $(BUILDDIR)/obj
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BUILDDIR)/obj/%.o: $(SRCDIR)/%.C
 	@mkdir -p $(BUILDDIR)/obj
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
@@ -68,11 +75,11 @@ clean:
 
 run: $(TARGET)
 	tput reset
-	LD_LIBRARY_PATH=./libs/lib64 $(TARGET)
+	$(TARGET)
 
 check: $(TARGET)
 	tput reset
-	LD_LIBRARY_PATH=./libs/lib64 valgrind --leak-check=full \
+	valgrind --leak-check=full \
          --show-leak-kinds=all \
          --track-origins=yes \
          $(TARGET)

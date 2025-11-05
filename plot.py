@@ -22,9 +22,9 @@ def bin_time(data, bin_size, method='mean'):
 
 
 if __name__ == "__main__":
-    filename = "data.bin"
+    filename = "dyn.bin"
     freq_num = 2**11
-    binning = 16
+    binning = 1
 
 # Read as flat array, then reshape
     data = np.fromfile(filename, dtype=np.float64)
@@ -35,9 +35,9 @@ if __name__ == "__main__":
 
 
     #fmax = 1772.00 
-    fmax = 2675.8 * u.MHz
-    fmin = (2675.8 - 512.0) * u.MHz
-    sampling = 1024*u.MHz 
+    fmin = 109.584 * u.MHz
+    fmax = 112.084 * u.MHz
+    sampling = 5*u.MHz 
 
     nchan = data_2d.shape[0]
     tau = (nchan / sampling).to(u.us) * binning * 2
@@ -55,6 +55,7 @@ if __name__ == "__main__":
     mask = (diff > lower) & (diff < upper)
 
     mask = mask & tails_mask
+    mask[:] = 1
 
 
 

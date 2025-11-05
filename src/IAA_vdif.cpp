@@ -140,7 +140,6 @@ void VDIFHeader::print() const
     std::cout << "das_id      ";
 
 	for (int i = 0; i < 8; ++i)
-		std::cout << *((char*) (&das_id) + sizeof(char)*i);  
 	std::cout << std::endl;
 }
 
@@ -209,6 +208,7 @@ void VDIFHeader::decode(const char* byte_array)
 		sampling = sampling / 1000.0;
 	}
 
+
 	sync_pattern = word5; // Full 32-bit word
 	das_id = (static_cast<uint64_t>(word6) << 32) | (word7); // Combine word6 and word7
 
@@ -262,6 +262,8 @@ IAA_vdif::IAA_vdif(const std::string& filename_in, size_t buffer_size):
 		header.decode(h_buffer); // Decode the header struct from the first frame
 		uint32_t n_samples = header.n_samples; // Get the number of samples from the decoded header
 		header.t0 = header.t; // Store the time of the first frame for relative calculations
+		header.nchann = 1;
+		header.tau = 1e-3/header.sampling;
 
 		// Find the total size of observation (number of points)
 		file.seekg(0, std::ios::end); // Move the read pointer to the end of the file
@@ -481,17 +483,18 @@ bool IAA_vdif::fill_buffer()
 
 // Public method implementation: fill_2d
 // Processes the data in the main buffer using FFTs to generate a 2D dynamic spectrum (power).
-void IAA_vdif::fill_2d(
-		std::vector<double>& dyn_spec, 
+size_t IAA_vdif::fill_2d(
+		double *dyn_spec, 
+		size_t time_steps,
 		size_t freq_num) 
 {
-	// Calculate the number of time steps based on the output vector size
-	size_t time_steps = dyn_spec.size() / freq_num;
 	// Each FFT processes a chunk of 2 * freq_num real samples
 	size_t samples_per_chunk = 2 * freq_num;
 
 	double* chunk_start = buffer; // Pointer to the start of the current processing chunk
 	double re, im; // Variables to hold real and imaginary parts of FFT output
+				   //
+	size_t filled = 0;
 
 	// Initialize FFTW plan and output array if they haven't been created yet
 	if (fft_arr == nullptr) 
@@ -551,93 +554,76 @@ void IAA_vdif::fill_2d(
 			// Access the k+1 element of the FFT output (skip DC component at index 0)
 			//re = fft_arr[k+1][0]; // Real part
 			//im = fft_arr[k+1][1]; // Imaginary part
-								  // Store the power (magnitude squared)
-								  //
+			// Store the power (magnitude squared)
+			//
 			re = fft_arr[freq_num - k][0]; // Real part
 			im = fft_arr[freq_num - k][1]; // Imaginary part
 			dyn_spec[chunk * freq_num + k] = re*re + im*im;
 		}
+
+		filled += 1;
 	}
+
+	return filled;
 }
 
 // Public method implementation: fill_1d
 // Processes the data in the main buffer using FFTs to generate a 1D complex dynamic spectrum.
-void IAA_vdif::fill_1d(
-		std::vector<std::complex<double>>& dyn_spec, 
-		size_t freq_num) 
+void IAA_vdif::fill_1d(fftw_complex *vec, size_t n)
 {
-	// Calculate the number of time steps based on the output vector size
-	size_t time_steps = dyn_spec.size() / freq_num;
-	// Each FFT processes a chunk of 2 * freq_num real samples
-	size_t samples_per_chunk = 2 * freq_num;
+	size_t i = 0;
+	size_t available;
+	size_t remaining;
+	size_t chunk;
+	double* buf_ptr;
+	fftw_complex* vec_ptr; 
 
-	double* chunk_start = buffer; // Pointer to the start of the current processing chunk
-
-	// Initialize FFTW plan and output array if they haven't been created yet
-	if (fft_arr == nullptr) 
+	while (i < n) 
 	{
-		// Allocate memory for FFTW's output array (freq_num + 1 complex numbers for R2C FFT)
-		fft_arr = static_cast<fftw_complex*>(fftw_malloc(sizeof(fftw_complex) * (freq_num + 1)));
-
-		// Allocate a temporary input buffer JUST FOR PLANNING
-		// as planning overwrites the input array
-		double* plan_input = (double*) fftw_malloc(sizeof(double) * samples_per_chunk);
-		std::fill_n(plan_input, samples_per_chunk, 0.0); // Initialize with zeros
-
-		// Create the FFTW plan for a real-to-complex FFT of size samples_per_chunk
-		// Note: The plan creation uses 'chunk_start' as a placeholder for input,
-		// the actual input buffer is specified in fftw_execute_dft_r2c.
-		p = fftw_plan_dft_r2c_1d(samples_per_chunk, plan_input, fft_arr, FFTW_PATIENT);
-
-		// Clean up scratch buffer — plan is now independent
-		fftw_free(plan_input);
-
-
-		if (!p) 
+		// Ensure buffer has data
+		if (buf_pos >= buf_max) 
 		{
-			fftw_free(fft_arr);
-			throw std::runtime_error("Failed to create FFTW plan for fill_1d");
-		}
-	}
-
-	// Process the buffer in chunks
-	for (size_t chunk = 0; chunk < time_steps; ++chunk) 
-	{
-		// Check if the current chunk fits within the currently filled part of the buffer
-		if (buf_pos + samples_per_chunk > buf_max) 
-		{
-			// If not, try to fill the buffer with more data from the file
-			if (!fill_buffer()) 
-				// If fill_buffer fails (e.g., EOF reached), stop processing
-				break;
-
-			// After filling, check again if the chunk fits
-			if (buf_pos + samples_per_chunk > buf_max)
-				// Even after refilling, the chunk doesn't fit. Likely end of data.
-				break;
+			fill_buffer();
+			if (buf_pos >= buf_max) break; // no more data
 		}
 
-		// Set the pointer to the start of the current chunk within the buffer
-		chunk_start = buffer + buf_pos;
+		// Determine how many elements we can copy without refilling
+		available = buf_max - buf_pos;
+		remaining = n - i;
+		chunk = std::min(available, remaining);
 
-		// Execute the FFT on the current chunk
-		fftw_execute_dft_r2c(p, chunk_start, fft_arr);
+		// Vectorizable loop: no conditionals, just assignments
+		buf_ptr = buffer + buf_pos;
+		vec_ptr = vec + i;
 
-		// Advance the buffer read position by the chunk size
-		buf_pos += samples_per_chunk;
+		#pragma omp simd
+		for (size_t j = 0; j < chunk; ++j) 
+		{
+			vec_ptr[j][0] = buf_ptr[j]; // real part
+			vec_ptr[j][1] = 0.0;        // imaginary part
+		}
 
-		// Copy the resulting complex FFT coefficients (excluding DC component at index 0)
-		// directly into the output vector dyn_spec.
-		// FFTW stores freq_num+1 complex numbers (for R2C), but we copy freq_num starting from index 1.
-		std::memcpy(
-				reinterpret_cast<void*>(&dyn_spec[chunk * freq_num]), // Destination in dyn_spec vector
-				reinterpret_cast<const void*>(fft_arr + 1),          // Source: FFT output array, starting from index 1
-				freq_num * sizeof(fftw_complex)                      // Number of bytes to copy
-				);
+		buf_pos += chunk;
+		i += chunk;
 	}
 }
 
+void IAA_vdif::skip(double sec)
+{
+	if (!file.is_open())
+		throw ("The file was not opened"); 
+
+	double frames = sec / (header.n_samples * 1.0e-6 / header.sampling);
+    file.seekg(size_t(frames) * header.frame_length, std::ios::cur);
+
+	size_t steps = size_t(frames - size_t(frames)) * header.n_samples;
+
+	read_frame();
+	buf_pos += steps;
+	header.t0 = (size_t(frames) * header.n_samples + steps) * 1.0e-6 / header.sampling /86400.0;
+}	
+
 double IAA_vdif::point2time(size_t points)
 {
-	return header.tau * static_cast<double> (points);
+	return header.tau*1e3 * static_cast<double> (points);
 }

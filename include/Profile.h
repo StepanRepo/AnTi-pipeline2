@@ -18,12 +18,12 @@ class Profile
 	public:
 		std::unique_ptr<BaseReader> reader;
 
-		std::vector<double> dyn;
-		std::vector<std::complex<double>> dync;
-		std::vector<double> sum;
-		std::vector<double> fr;
-		std::vector<double> mask;
-		std::vector<double> int_prf;
+		double *dyn;
+		fftw_complex *dync;
+		double *sum;
+		double *fr;
+		double *mask;
+		double *int_prf;
 
 		// Construct from filename + format
 		Profile(const std::string& filename, 
@@ -32,13 +32,14 @@ class Profile
 				);
 
 		// Forward fill functions
-		void fill_2d(std::vector<double>& dyn_spec, size_t freq_num);
-		void fill_1d(std::vector<std::complex<double>>& dyn_spec, size_t freq_num);
+		size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num);
+		void fill_1d(fftw_complex *vec, size_t n);
 
 		void dedisperse_incoherent (double DM);
 		void dedisperse_coherent (double DM);
 
-		void fold(double P);
+		void fold_dyn(double P, size_t nchann);
+		void fold_dyn(std::string pred_file, size_t nchann);
 
 		// Access header info
 		BaseHeader* getHeader();

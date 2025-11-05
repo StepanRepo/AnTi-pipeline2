@@ -1,0 +1,31 @@
+general:
+  mode: "dedisperse"
+  input_dir: "."
+  output_dir: "."
+  ephem: "/home/wall-e/miniconda3/envs/ent15y/share/tempo2/ephemeris/DE405.1950.2050"
+  verbose: 2
+
+  t0: .2
+  #t1: 300.0
+
+
+options:
+
+  # "dedisperce" options
+  ddtype: "incoherent"
+
+  fold: true
+  #t2pred: "t2pred.dat"
+
+  nchann: 2048
+  mask: ""
+  filter: true          # this only available for incoherent dedispersion
+  tail_threshold: .7    # this only available for incoherent dedispersion
+  std_threshold: 3      # this only available for incoherent dedispersion
+
+  
+advanced:
+  numpuls: 1000
+
+files:
+  - ./010818_0329+54_00adc

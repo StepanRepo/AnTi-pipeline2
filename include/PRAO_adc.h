@@ -76,12 +76,15 @@ class PRAO_adc : public BaseReader
 		// Handles conversion from voltage to oservable 
 		// power spectrum -- dynamic spectrum for 
 		// incoherent dedispersion
-		void fill_2d(std::vector<double>& dyn_spec, size_t freq_num) override;
+		size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num) override;
 
 		// Handles conversion from voltage to oservable 
 		// complex spectrum -- complex dynamic spectrum
 		// for coherent dedispersion
-		void fill_1d(std::vector<std::complex<double>>& dyn_spec, size_t freq_num) override;
+		void fill_1d(fftw_complex *vec, size_t n) override;
+
+		virtual double point2time(size_t point) override;
+		virtual void skip(double sec) override;
 };
 
 #endif // PRAO_ADC_H
