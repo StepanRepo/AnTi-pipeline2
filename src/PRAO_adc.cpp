@@ -119,6 +119,11 @@ ADCHeader::ADCHeader():
 	// initializer list above as defaut values
 }
 
+void PRAO_adc::set_limit(double t)
+{
+	header.CUT_SIZE = size_t (t * 1.0e3 / header.tau);
+}
+
 // Implementation of the ADCHeader::decode method.
 void ADCHeader::decode(const char* h_buff) 
 {
@@ -136,6 +141,7 @@ void ADCHeader::decode(const char* h_buff)
 	buffer_c[40] = '\0'; // Explicitly null-terminate after strncpy
     str_split(buffer_c, key, value);
     numpar = std::stoi(value);
+
 
     for (size_t i = 1; i < numpar; ++i) 
 	{
@@ -386,7 +392,7 @@ bool PRAO_adc::fill_buffer()
     size_t data_read_so_far = static_cast<size_t>(data_read_so_far_off);
 
     // Check if we've already read all the expected data
-    if (data_read_so_far >= header.OBS_SIZE) 
+    if (data_read_so_far >= header.OBS_SIZE || data_read_so_far >= header.CUT_SIZE) 
         return false;
 
     // Determine how much more data we can read

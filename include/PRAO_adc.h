@@ -85,6 +85,7 @@ class PRAO_adc : public BaseReader
 
 		virtual double point2time(size_t point) override;
 		virtual void skip(double sec) override;
+		virtual void set_limit(double t) override; 
 };
 
 #endif // PRAO_ADC_H

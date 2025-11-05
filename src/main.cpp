@@ -38,23 +38,40 @@ int main()
 	verbose = config["general"]["verbose"].as<int>(); 
 
 
-	std::string format = "PRAO_adc";
+	std::string format = "IAA_vdif";
 
-	if (mode == "dedisperse")
+	for (const auto& filename_yaml : config["files"]) 
 	{
-		for (const auto& filename_yaml : config["files"]) 
+
+		filename = filename_yaml.as<std::string>();
+
+		Profile profile(input_dir + filename, format); 
+		BaseHeader* hdr = profile.getHeader();
+		if (!hdr) 
+			throw std::runtime_error("Header not available");
+		else
+			hdr->print();
+
+		if (config["advanced"])
 		{
-			filename = filename_yaml.as<std::string>();
+			for (const auto& kv : config["advanced"]) 
+			{
+				const std::string key = kv.first.as<std::string>();
+				const std::string value = kv.second.as<std::string>();
 
-			Profile profile(input_dir + filename, format); 
-			BaseHeader* hdr = profile.getHeader();
-			if (!hdr) 
-				throw std::runtime_error("Header not available");
-			else
-				hdr->print();
+				hdr-> update_header(key, value);
+			}
+		}
 
-			if (config["general"]["t0"] && !config["general"]["t0"].IsNull())
-				profile.reader->skip(config["general"]["t0"].as<double>());
+
+		if (config["general"]["t0"] && !config["general"]["t0"].IsNull())
+			profile.reader->skip(config["general"]["t0"].as<double>());
+
+		if (config["general"]["t1"] && !config["general"]["t1"].IsNull())
+			profile.reader->set_limit(config["general"]["t1"].as<double>());
+
+		if (mode == "dedisperse")
+		{
 
 
 			if (config["options"]["fold"].as<bool>())

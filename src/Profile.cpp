@@ -7,6 +7,7 @@
 #include <memory>
 #include <algorithm>
 
+
 # define M_PI           3.14159265358979323846
 # define C           299792.458
 
@@ -85,6 +86,7 @@ void Profile::dedisperse_incoherent(double DM)
 	nchann = reader->header_ptr->nchann;
 	obs_window = reader->header_ptr->obs_window;
 
+
 	if (fmin == 0.0 || fmax == 0.0 || nchann == 1)
         throw std::runtime_error("Frequency information was not provided");
 	if (obs_window == 0)
@@ -99,15 +101,16 @@ void Profile::dedisperse_incoherent(double DM)
 
 	freqs = new double[nchann];
 	dt = new double[nchann];
-	double df = reader->header_ptr->sampling / 2.0  / nchann;
+	double df = (fmax - fmin)  / nchann;
 
 	#pragma omp simd
 	for (size_t i = 0; i < nchann; ++i)
-		freqs[i] = std::min(fmin, fmax) + df * (static_cast<double>(i) + .5);
+		freqs[i] = fmin + df * (static_cast<double>(i) + .5);
 
 	#pragma omp simd
 	for (size_t i = 0; i < nchann; ++i)
 		dt[i] = 4.148808e6 * DM * (1.0/freqs[i]/freqs[i] - 1.0/fcomp/fcomp);
+
 
 	try
 	{
@@ -127,20 +130,16 @@ void Profile::dedisperse_incoherent(double DM)
         throw; // Re-throw to signal failure
     }
 
-
-
 	int shift;
 	for (size_t i = 0; i < nchann; ++i) 
 	{
 		shift = static_cast<int> (dt[i] / tau + 0.5);
 
-		// Copy time series for this freq into temp
-		#pragma omp simd
-		for (size_t t = 0; t < obs_window; ++t) 
-			temp[t] = dyn[t * nchann + i];
 
-		// Roll in temp
-		std::rotate(temp, temp+shift, temp+obs_window);
+		// Copy time series for this freq into temp
+#pragma omp simd
+		for (size_t t = 0; t < obs_window; ++t) 
+			temp[t] = dyn[((t+shift)%obs_window)  * nchann + i];
 
 		// Write back
 		for (size_t t = 0; t < obs_window; ++t) 
@@ -153,9 +152,9 @@ void Profile::dedisperse_coherent(double DM)
 	throw std::runtime_error("The function is broken");
 
 
-    if (!reader || !reader->is_open) 
+	if (!reader || !reader->is_open) 
 	{
-        throw std::runtime_error("Reader not initialized or file not open");
+		throw std::runtime_error("Reader not initialized or file not open");
 	}
 
 	size_t sum_len;
@@ -395,6 +394,7 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
         throw std::runtime_error("Reader not initialized or file not open");
 
 
+
 	// T2predict takes char* as input file path
 	char* pred_file_c = new char[pred_file.length() + 1];
 	strcpy(pred_file_c, pred_file.c_str());
@@ -404,11 +404,12 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 
 	if (T2Predictor_Read(pred, pred_file_c) != 0)
         throw std::runtime_error("Prediction file can not be loaded");
-/*
+
+	/*
 	// find Earth's posvel in AU and AU/day respectively
-	void *jpleph;
+	void *jpleph = nullptr;
 	double posvel[6];
-	jpleph =  jpl_init_ephemeris("/home/wall-e/miniconda3/envs/ent15y/share/tempo2/ephemeris/DE405.1950.2050", NULL, NULL);
+	jpleph =  jpl_init_ephemeris("/home/andrianovs/tempo2/T2runtime/ephemeris/DE405.1950.2050", NULL, NULL);
 
 	jpl_pleph(jpleph, 2400000.5 + reader->header_ptr->t0, 3, 11, posvel, 1);
 
@@ -436,7 +437,8 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 
 
 	return;
-*/
+	*/
+
 
 	double P;
 	size_t obs_window;
@@ -483,11 +485,9 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 	tau = reader->header_ptr->tau;
 	obs_window = size_t(P*1e3 / tau);
 	reader->header_ptr->obs_window = obs_window;
-	
 
 	if (obs_window * tau > P*1e3)
 		throw std::runtime_error("Observational window must be less than period!");
-
 
 
 	try
@@ -546,7 +546,6 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 
 
 		buff_curr = buff + buf_pos * nchann;
-		#pragma omp simd
 		for (size_t i = 0; i < obs_window; ++i)
 		{
 			#pragma omp simd
@@ -573,6 +572,7 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 		std::cout << "\r\033[K"; // move to the beginning of the line and clear the line
 		std::cout << "rev: " << rev << " diff: " << std::setw(5);
 		std::cout << int((rev*P - reader->point2time(sumidx))*1e6) << " us" << std::flush;
+
 	}
 	std::cout<<std::endl;
 

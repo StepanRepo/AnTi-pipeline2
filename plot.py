@@ -1,4 +1,4 @@
-#! /bin/python
+#! venv/bin/python
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -23,21 +23,21 @@ def bin_time(data, bin_size, method='mean'):
 
 if __name__ == "__main__":
     filename = "dyn.bin"
-    freq_num = 2**11
-    binning = 1
+    freq_num = 16384
+    binning = 32
 
 # Read as flat array, then reshape
     data = np.fromfile(filename, dtype=np.float64)
-    data_2d = data.reshape(-1, freq_num).T
-    data_2d = bin_time(data_2d, binning)
+    data_2d = data.reshape(-1, freq_num)
+    data_2d = bin_time(data_2d, binning).T
     
     
 
 
     #fmax = 1772.00 
-    fmin = 109.584 * u.MHz
-    fmax = 112.084 * u.MHz
-    sampling = 5*u.MHz 
+    fmin = 0 * u.MHz
+    fmax = 1 * u.MHz
+    sampling = 1024*u.MHz 
 
     nchan = data_2d.shape[0]
     tau = (nchan / sampling).to(u.us) * binning * 2
@@ -55,7 +55,7 @@ if __name__ == "__main__":
     mask = (diff > lower) & (diff < upper)
 
     mask = mask & tails_mask
-    mask[:] = 1
+    #mask[:] = 1
 
 
 
@@ -113,6 +113,7 @@ if __name__ == "__main__":
                     vmax = upper,
                     )
 
+
     ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))
 
 
@@ -132,5 +133,7 @@ if __name__ == "__main__":
     ax[1, 0].set_ylabel("Integal Intensity")
 
 
+
+    #ax[0, 0].set_xlim(330, 450)
 
     save_image("123.pdf")

@@ -137,12 +137,13 @@ void VDIFHeader::print() const
     std::cout << "tau         " << tau << std::endl;
     std::cout << "BPS         " << size_t(bits_per_sample) << std::endl;
     std::cout << "station_id  " << station_id << std::endl;
-    std::cout << "das_id      ";
-
-	for (int i = 0; i < 8; ++i)
-	std::cout << std::endl;
+    std::cout << "das_id      " << das_id << std::endl;;
 }
 
+void IAA_vdif::set_limit(double t)
+{
+	header.CUT_SIZE = size_t (t * 1.0e3/header.tau);
+}
 
 // Implementation of the VDIFHeader::decode method.
 // Parses the raw byte array into the struct's member variables according to the VDIF specification.
@@ -174,6 +175,7 @@ void VDIFHeader::decode(const char* byte_array)
 	bits_per_sample = ((word3 >> 26) & 0x1F) + 1; // Bits 26-30 + 1
 	thread_id = (word3 >> 16) & 0x03FF;       // Bits 16-25
 	station_id = word3 & 0xFFFF;              // Bits 0-15
+											  //
 
 	// --- Validation checks ---
 	if (complex_data) 
@@ -192,8 +194,10 @@ void VDIFHeader::decode(const char* byte_array)
 
 	// --- Decode optional fields from the next 4 words (if not legacy) ---
 	extended_data_version = (word4 >> 24) & 0xFF; // Bits 24-31
+
 	if (extended_data_version != 0x01) 
 		throw std::invalid_argument("Unknown extended data version: EDV = " + std::to_string(extended_data_version));
+	
 
 	uflag = (word4 >> 23) & 0x01; // Bit 23
 	sampling = static_cast<double>(word4 & 0x007FFFFF); // Bits 0-22
@@ -240,6 +244,8 @@ IAA_vdif::IAA_vdif(const std::string& filename_in, size_t buffer_size):
 		// CRITICAL: Define base class member
 		// to point at the right header
 		header_ptr = &header;
+
+		n_read = 0;
 
 		filename = filename_in;
 		file.open(filename, std::ios::binary);
@@ -447,13 +453,11 @@ bool IAA_vdif::fill_buffer()
 	t_prev = (header.t - header.t0) * 86400.0L; // Convert time difference to seconds
 
 	// Loop to read frames until the buffer is full or EOF is reached
-	while (read_frame()) 
+	while (n_read < header.CUT_SIZE && read_frame()) 
 	{ // Keep calling read_frame until it returns false (EOF or buffer full)
 		t_cur = (header.t - header.t0) * 86400.0L; // Get current frame time in seconds
+		n_read += header.n_samples;
 
-		// Print current time to console (for progress tracking)
-		std::cout << std::setprecision(6) << "\rtime: " << t_cur << " s";
-		std::cout.flush(); // Ensure output is displayed immediately
 
 		// Check if there's a significant gap in time between the previous and current frame
 		if (t_cur - t_prev > 1.001 * time_step) 
@@ -471,12 +475,12 @@ bool IAA_vdif::fill_buffer()
 			}
 
 			buf_max += to_fill; // Update the buffer fill level
+			n_read += to_fill;
 		}
 
 		t_prev = t_cur; // Update previous time for the next iteration
 	}
 
-	std::cout << std::endl; // New line after time tracking output
 							
 	return true; // Indicate successful filling (or reaching EOF/buffer limit)
 }
@@ -620,10 +624,10 @@ void IAA_vdif::skip(double sec)
 
 	read_frame();
 	buf_pos += steps;
-	header.t0 = (size_t(frames) * header.n_samples + steps) * 1.0e-6 / header.sampling /86400.0;
+	header.t0 += (size_t(frames) * header.n_samples + steps) * 1.0e-6 / header.sampling /86400.0;
 }	
 
 double IAA_vdif::point2time(size_t points)
 {
-	return header.tau*1e3 * static_cast<double> (points);
+	return header.tau*1e-3 * static_cast<double> (points);
 }

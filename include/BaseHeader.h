@@ -3,12 +3,15 @@
 #define BASE_HEADER_H
 
 #include <string>
+#include <stdint.h> // For declaration of maximum size_t value: MAX_SIZE
+
 
 class BaseHeader 
 {
 	public:
 		// File information
 		size_t OBS_SIZE = 0;		// Number of points in the file
+		size_t CUT_SIZE = SIZE_MAX;		// Number of points before cutoff
 		long double t0 = 0.0L;      // Start time in MJD
 		std::string name = "";
 		size_t numpar = 0;
@@ -42,6 +45,7 @@ class BaseHeader
 
 		// Common interface methods 
 		virtual void print() const = 0;
+		void update_header(std::string key, std::string value);
 };
 
 #endif // BASE_HEADER_H

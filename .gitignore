@@ -1,0 +1,9 @@
+data/*
+build/*
+venv/*
+jpl_eph/*
+*.pdf
+*.bin
+main
+*.txt
+wisdoms/*

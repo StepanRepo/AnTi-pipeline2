@@ -47,7 +47,7 @@ class BaseReader
 
 		virtual double point2time(size_t point) = 0;
 		virtual void skip(double sec) = 0;
-
+		virtual void set_limit(double t) = 0;
 };
 
 #endif // BASE_READER_H

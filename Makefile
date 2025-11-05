@@ -16,15 +16,15 @@ CXXFLAGS = -Wall -Wextra -std=c++17 -O2 -g -fopenmp -march=native
 
 # Include directories (paths where the compiler looks for header files)
 # The -I flag tells the compiler where to find #include files
-INCLUDES = -I./include -I./libs/include -I$(HOME)/miniconda3/envs/ent15y/include -I./jpl_eph
+INCLUDES = -I./include -I./jpl_eph -I$(TEMPO2_PREFIX)/tempo2 
 
 # Library flags (paths where the linker looks for libraries and the libraries themselves)
 # -L flag for library paths, -l flag for library names
 # Example: -L/path/to/lib -lfftw3
 LIBS = -lfftw3 -lyaml-cpp -ltempo2pred -ljpl
-LIBS += -L$(HOME)/miniconda3/envs/ent15y/lib -L./libs/lib64 -L./jpl_eph
+LIBS += -L$(TEMPO2_PREFIX)/tempo2  -L./jpl_eph
 
-RPATHS = -Wl,-rpath,$(HOME)/miniconda3/envs/ent15y/lib 
+RPATHS = -Wl,-rpath,$(TEMPO2_PREFIX)/tempo2 
 
 # --- Source and Build Directories ---
 SRCDIR = src
