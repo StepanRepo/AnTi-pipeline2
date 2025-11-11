@@ -6,8 +6,75 @@
 #include <stdexcept>
 #include <fstream>
 #include <iomanip>
+#include <cstdlib>
+#include <filesystem>
 #include <yaml-cpp/yaml.h>
 #include "Profile.h" 
+
+std::string resolve_path(const std::string& input) 
+{
+	std::string til_result, result;
+	std::string::size_type pos = 0;
+
+	if (input.substr(0, 1) == "~")
+		til_result = "$HOME/" + input.substr(1, input.length());
+	else
+		til_result = input;
+
+
+	while (pos < til_result.length()) 
+	{
+		std::string::size_type dollar = til_result.find('$', pos);
+
+		// There is no dollar sign
+		if (dollar == std::string::npos) 
+		{
+			result += til_result.substr(pos);
+			break;
+		}
+
+		result += til_result.substr(pos, dollar - pos);
+		++dollar; // skip '$'
+
+		// Handle ${VAR} or $VAR
+		bool braced = (dollar < til_result.length() && til_result[dollar] == '{');
+		std::string::size_type start = dollar + (braced ? 1 : 0);
+		std::string::size_type end = start;
+
+		while (end < til_result.length() &&
+				((til_result[end] >= 'A' && til_result[end] <= 'Z') ||
+				 (til_result[end] >= '0' && til_result[end] <= '9') ||
+				 til_result[end] == '_')) 
+		{
+			++end;
+		}
+
+		std::string varName = til_result.substr(start, end - start);
+		const char* envValue = std::getenv(varName.c_str());
+
+		if (envValue) 
+		{
+			result += envValue;
+		} 
+		else 
+		{
+			// Optionally: leave unresolved var as-is or throw
+			result += '$' + (braced ? '{' + varName + '}' : varName);
+		}
+
+		pos = end + (braced && end < til_result.length() && til_result[end] == '}' ? 1 : 0);
+	}
+
+	try 
+	{
+		return std::filesystem::canonical(result).string() + "/";
+	} catch (const std::filesystem::filesystem_error& e) 
+	{
+		throw std::runtime_error("Invalid path after expansion: " + result);
+	}
+}
+
+
 
 YAML::Node config;
 
@@ -30,6 +97,7 @@ int main()
 	std::string input_dir;
 	std::string output_dir;
 	std::string filename;
+	std::string parfile, ehemeris;
 	int verbose;
 
 	mode = config["general"]["mode"].as<std::string>();
@@ -37,8 +105,11 @@ int main()
 	output_dir = config["general"]["output_dir"].as<std::string>() + "/";
 	verbose = config["general"]["verbose"].as<int>(); 
 
+	input_dir = resolve_path(input_dir);
+	output_dir = resolve_path(output_dir);
 
-	std::string format = "IAA_vdif";
+
+	std::string format = "PRAO_adc";
 
 	for (const auto& filename_yaml : config["files"]) 
 	{
@@ -70,8 +141,19 @@ int main()
 		if (config["general"]["t1"] && !config["general"]["t1"].IsNull())
 			profile.reader->set_limit(config["general"]["t1"].as<double>());
 
+
+
+		// Find redshift correction if the parameter file is available
+		if (config["general"]["parfile"] && !config["general"]["parfile"].IsNull())
+		{
+			parfile = input_dir + config["general"]["parfile"].as<std::string>();
+			profile.get_redshift(parfile);
+		}
+
+
 		if (mode == "dedisperse")
 		{
+			size_t nchann = config["options"]["nchann"].as<size_t>();
 
 
 			if (config["options"]["fold"].as<bool>())
@@ -87,39 +169,38 @@ int main()
 				{
 					profile.fold_dyn(
 							input_dir + config["options"]["t2pred"].as<std::string>(), 
-							config["options"]["nchann"].as<size_t>());
+							nchann);
 				}
 				else 
 				{
-					profile.fold_dyn(
-							hdr->period,
-							config["options"]["nchann"].as<size_t>());
+					profile.fold_dyn(hdr->period, nchann);
 				}
+				
+				if (config["options"]["ddtype"].as<std::string>() == "incoherent")
+				{
+					profile.dedisperse_incoherent(hdr->dm, nchann);
+				}
+				else if (config["options"]["ddtype"].as<std::string>() == "coherent")
+				{
+					profile.dedisperse_coherent(hdr->dm, nchann);
+				}
+				else
+					throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
 			}
 			else
 			{
-			throw("in progress");
+				if (config["options"]["ddtype"].as<std::string>() == "incoherent")
+				{
+					profile.dedisperse_incoherent_stream (hdr->dm, nchann);
+				}
+				else if (config["options"]["ddtype"].as<std::string>() == "coherent")
+				{
+					profile.dedisperse_coherent_stream (hdr->dm, nchann);
+				}
+				else
+					throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
 			}
 
-			profile.dedisperse_incoherent(hdr->dm);
-
-
-			// After computing dynamic_spectrum
-			if (profile.dyn != nullptr)
-			{
-				std::ofstream output("dyn.bin", std::ios::binary);
-				output.write(reinterpret_cast<const char*>(profile.dyn),
-						hdr->nchann * hdr->obs_window * sizeof(double));
-				output.close();
-			}
-
-			if (profile.sum != nullptr)
-			{
-				std::ofstream output("sum.bin", std::ios::binary);
-				output.write(reinterpret_cast<const char*>(profile.sum),
-						hdr->OBS_SIZE/2 * sizeof(double));
-				output.close();
-			}
 
 
 		}

@@ -22,38 +22,40 @@ def bin_time(data, bin_size):
 
 
 if __name__ == "__main__":
-    filename = "data.bin"
-    binning = 1
+    
+    path = Path(".")
+
+    for filename in path.glob("*.bin"):
+        print(f"Processing {filename.stem}")
+        binning = 1024
+        tau = 0.000200089*binning
+        print(tau)
 
 # Read as flat array, then reshape
-    data = np.fromfile(filename, dtype=np.float64)
-    data = bin_time(data, binning)
+        data = np.fromfile(filename, dtype=np.float64)
+        data = bin_time(data, binning)
 
-    tau = 2000e-9/1024 * binning
-    tau = 200e-9*binning
-    o = np.argmax(data)
-    t = np.arange(len(data)) * tau
-    t -= t[o]
-    #data = data[7200000 : 7_300_000]
-    print(np.any(np.isnan(data)))
+        t = np.arange(len(data)) * tau
 
-    plt.figure()
-    plt.plot(t*1e6, data)
-    plt.xlabel("t, us")
-    delta = 10
-    plt.xlim(-delta, +delta)
+        plt.figure()
+        plt.title(filename.stem)
+        plt.plot(t, data)
+        plt.xlabel("t, ms")
 
-    plt.figure()
-    plt.plot(t*1e6, data)
-    plt.xlabel("t, us")
-    delta = 100
-    plt.xlim(-delta, +delta)
+        P = 0.71446991958999994665
+        obs_window = int(P*1e3 / tau);
+        int_prf = np.zeros(obs_window)
+        skip = 0
 
-    plt.figure()
-    plt.plot(t*1e6, data)
-    plt.xlabel("t, us")
-    delta = 1000
-    #plt.xlim(-delta, +delta)
+        plt.figure()
+        for i in range(len(data)//obs_window):
+            skip = int(i*(P*1e3/tau - obs_window) + .5)
+            temp = data[i*obs_window + skip: (i+1)*obs_window + skip]
+            int_prf += temp
 
+            plt.plot(t[:obs_window], temp)
+
+        plt.figure()
+        plt.plot(t[:obs_window], int_prf)
     
     save_image("123.pdf")

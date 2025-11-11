@@ -573,7 +573,7 @@ size_t IAA_vdif::fill_2d(
 
 // Public method implementation: fill_1d
 // Processes the data in the main buffer using FFTs to generate a 1D complex dynamic spectrum.
-void IAA_vdif::fill_1d(fftw_complex *vec, size_t n)
+size_t IAA_vdif::fill_1d(fftw_complex *vec, size_t n)
 {
 	size_t i = 0;
 	size_t available;
@@ -610,6 +610,8 @@ void IAA_vdif::fill_1d(fftw_complex *vec, size_t n)
 		buf_pos += chunk;
 		i += chunk;
 	}
+
+	return i;
 }
 
 void IAA_vdif::skip(double sec)

@@ -220,7 +220,7 @@ void ADCHeader::decode(const char* h_buff)
     // sampling rate is wrong in the file's header
     // it is 200 ns
 	nchann = 1;
-	tau = 200.0e-6; // !!! NEED PRECICE VALUE. CONTACT CONSTRUCTORS !!!
+	tau = 200.089e-6; // !!! NEED PRECICE VALUE. CONTACT CONSTRUCTORS !!!
     sampling = 1.0e-3 / tau; // Recalculate sampling rate in MHz based on corrected tau
 }
 
@@ -397,8 +397,11 @@ bool PRAO_adc::fill_buffer()
 
     // Determine how much more data we can read
     size_t max_to_read = header.OBS_SIZE - data_read_so_far;
+    size_t cut_to_read = header.CUT_SIZE - data_read_so_far;
     size_t space_available = buf_size - buf_max; // Space left in the buffer
+												 //
     size_t to_read = std::min(max_to_read, space_available);
+	to_read = std::min(to_read, cut_to_read);
 
     if (to_read == 0) 
         return false; // Buffer is full or no more data to read
@@ -507,7 +510,7 @@ size_t PRAO_adc::fill_2d(double* dyn_spec, size_t time_steps, size_t freq_num)
 
 // Public method implementation: fill_1d
 // Processes the data in the main buffer using FFTs to generate a 1D complex dynamic spectrum.
-void PRAO_adc::fill_1d(fftw_complex *vec, size_t n) 
+size_t PRAO_adc::fill_1d(fftw_complex *vec, size_t n) 
 {
 	size_t i = 0;
 	size_t available;
@@ -544,6 +547,8 @@ void PRAO_adc::fill_1d(fftw_complex *vec, size_t n)
 		buf_pos += chunk;
 		i += chunk;
 	}
+
+	return i;
 }
 
 void PRAO_adc::skip(double sec)
@@ -553,7 +558,7 @@ void PRAO_adc::skip(double sec)
 
 	size_t steps = sec * (header.sampling * 1.0e6);
     file.seekg(steps * sizeof(int8_t), std::ios::cur);
-	header.t0 += steps * header.sampling * 1.0e6 / 86400.0;
+	header.t0 += steps / (header.sampling * 1.0e6) / 86400.0;
 }	
 
 double PRAO_adc::point2time(size_t point) 

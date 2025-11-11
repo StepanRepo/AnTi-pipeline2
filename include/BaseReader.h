@@ -43,7 +43,7 @@ class BaseReader
 
 		// Pure virtual methods — must be implemented by derived classes
 		virtual size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num) = 0;
-		virtual void fill_1d(fftw_complex* vec, size_t n) = 0;
+		virtual size_t fill_1d(fftw_complex* vec, size_t n) = 0;
 
 		virtual double point2time(size_t point) = 0;
 		virtual void skip(double sec) = 0;

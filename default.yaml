@@ -2,22 +2,24 @@ general:
   mode: "dedisperse"
   input_dir: "data"
   output_dir: "data"
-  ephem: "/home/andrianovs/tempo2/T2runtime/ephemeris/DE405.1950.2050"
+  parfile: "0329.par"
+  site: "PO"
   verbose: 2
 
-  t0: .3
-  t1: 2.0
+  #t0: 0.3
+  #t1: 20
 
 
 options:
 
   # "dedisperce" options
-  ddtype: "incoherent"
+  ddtype: "coherent"
 
-  fold: true
-  t2pred: "t2pred.dat"
+  fold: false
+  #t2pred: "t2pred.dat"
 
-  nchann: 16384
+  nchann: 4194304
+  #nchann: 512
   mask: ""
   filter: true          # this only available for incoherent dedispersion
   tail_threshold: .7    # this only available for incoherent dedispersion
@@ -25,10 +27,13 @@ options:
 
   
 advanced:
-  fmax: 1260.0
-  fmin: 1772.0
-  sampling: 1024.0
-  dm: 26.776
+  #fmax: 1260.0
+  #fmin: 1772.0
+  #sampling: 1024.0
 
 files:
-  - rup106_bd_321-1252_ch07.vdif
+  - 010818_0329+54_00adc
+#  - 020818_0329+54_00adc
+#  - 011022_1133+16_00adc
+#  - 011222_1133+16_00adc
+#  - 220621_0531+21_00adc

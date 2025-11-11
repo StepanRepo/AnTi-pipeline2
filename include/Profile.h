@@ -25,6 +25,8 @@ class Profile
 		double *mask;
 		double *int_prf;
 
+		double redshift;
+
 		// Construct from filename + format
 		Profile(const std::string& filename, 
 				const std::string& format, 
@@ -33,13 +35,18 @@ class Profile
 
 		// Forward fill functions
 		size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num);
-		void fill_1d(fftw_complex *vec, size_t n);
+		size_t fill_1d(fftw_complex *vec, size_t n);
 
-		void dedisperse_incoherent (double DM);
-		void dedisperse_coherent (double DM);
+		void dedisperse_incoherent (double DM, size_t nchann);
+		void dedisperse_coherent (double DM, size_t nchann);
+
+		void dedisperse_incoherent_stream (double DM, size_t nchann);
+		void dedisperse_coherent_stream (double DM, size_t nchann);
 
 		void fold_dyn(double P, size_t nchann);
 		void fold_dyn(std::string pred_file, size_t nchann);
+
+		double get_redshift (std::string par_path);
 
 		// Access header info
 		BaseHeader* getHeader();

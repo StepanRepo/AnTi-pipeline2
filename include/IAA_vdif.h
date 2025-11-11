@@ -130,7 +130,7 @@ public:
 	// Handles conversion from voltage to oservable 
 	// complex spectrum -- complex dynamic spectrum
 	// for coherent dedispersion
-	void fill_1d(fftw_complex* vec, size_t n) override;
+	size_t fill_1d(fftw_complex* vec, size_t n) override;
 
 	// Transforms a number of points, used in the analisys
 	// to corresponding time from the beginning of 
