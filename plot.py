@@ -10,7 +10,7 @@ import astropy.units as u
 from astropy.time import Time
 from scipy.stats import sigmaclip
 
-def bin_time(data, bin_size, method='mean'):
+def bin_time(data, bin_size):
     T, F = data.shape
     n_bins = T // bin_size
     trimmed = data[:n_bins * bin_size]
@@ -22,18 +22,22 @@ def bin_time(data, bin_size, method='mean'):
 
 
 if __name__ == "__main__":
+    path = Path("data")
     path = Path(".")
 
     for filename in path.glob("*.bin"):
         print(f"Processing {filename.stem}")
 
-        freq_num = 512
-        binning = 1
+        freq_num = 32768
+        sampling = 1024*u.MHz 
+        binning = 64
 
 # Read as flat array, then reshape
         data = np.fromfile(filename, dtype=np.float64)
         data_2d = data.reshape(-1, freq_num)
         data_2d = bin_time(data_2d, binning).T
+
+        data_2d = data_2d[:, :-100]
         
         
 
@@ -41,7 +45,6 @@ if __name__ == "__main__":
         #fmax = 1772.00 
         fmin = 0 * u.MHz
         fmax = 1 * u.MHz
-        sampling = 5*u.MHz 
 
         nchan = data_2d.shape[0]
         tau = (nchan / sampling).to(u.us) * binning * 2

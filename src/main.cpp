@@ -97,26 +97,37 @@ int main()
 	std::string input_dir;
 	std::string output_dir;
 	std::string filename;
+	std::string site;
 	std::string parfile, ehemeris;
 	int verbose;
+	double buf_size;
 
 	mode = config["general"]["mode"].as<std::string>();
 	input_dir = config["general"]["input_dir"].as<std::string>() + "/";
 	output_dir = config["general"]["output_dir"].as<std::string>() + "/";
+	site = config["general"]["site"].as<std::string>(); 
 	verbose = config["general"]["verbose"].as<int>(); 
+
+	if (config["general"]["buf_size"] && !config["general"]["buf_size"].IsNull())
+		buf_size = config["general"]["buf_size"].as<double>(); 
+	else
+		buf_size = 2.0;
 
 	input_dir = resolve_path(input_dir);
 	output_dir = resolve_path(output_dir);
 
 
-	std::string format = "PRAO_adc";
+	std::string format = "IAA_vdif";
+
 
 	for (const auto& filename_yaml : config["files"]) 
 	{
 
 		filename = filename_yaml.as<std::string>();
 
-		Profile profile(input_dir + filename, format); 
+		Profile profile(input_dir + filename, format, 
+				size_t(buf_size * 1024 * 1024 * 1024)); 
+
 		BaseHeader* hdr = profile.getHeader();
 		if (!hdr) 
 			throw std::runtime_error("Header not available");
@@ -147,13 +158,16 @@ int main()
 		if (config["general"]["parfile"] && !config["general"]["parfile"].IsNull())
 		{
 			parfile = input_dir + config["general"]["parfile"].as<std::string>();
-			profile.get_redshift(parfile);
+			profile.get_redshift(parfile, site);
 		}
 
 
 		if (mode == "dedisperse")
 		{
 			size_t nchann = config["options"]["nchann"].as<size_t>();
+			std::string mask_file
+
+			if (config["options"] && config["options"]["t2pred"]) 
 
 
 			if (config["options"]["fold"].as<bool>())
@@ -163,7 +177,8 @@ int main()
 				if (config["options"] && config["options"]["t2pred"]) 
 					if (! config["options"]["t2pred"].IsNull()) 
 						t2_pred_file = config["options"]["t2pred"].as<std::string>();
-				
+
+
 
 				if (t2_pred_file != "")
 				{
@@ -175,10 +190,20 @@ int main()
 				{
 					profile.fold_dyn(hdr->period, nchann);
 				}
+
+				std::ofstream raw_out (output_dir + filename + "_dyn.bin");
+				raw_out.write(reinterpret_cast<const char*>(profile.dyn),
+						hdr->nchann * hdr->obs_window * sizeof(double));
+				raw_out.close();
 				
 				if (config["options"]["ddtype"].as<std::string>() == "incoherent")
 				{
 					profile.dedisperse_incoherent(hdr->dm, nchann);
+
+					std::ofstream dd_out (output_dir + filename + "_dd.bin");
+					dd_out.write(reinterpret_cast<const char*>(profile.dyn),
+							hdr->nchann * hdr->obs_window * sizeof(double));
+					dd_out.close();
 				}
 				else if (config["options"]["ddtype"].as<std::string>() == "coherent")
 				{

@@ -3,11 +3,12 @@ general:
   input_dir: "data"
   output_dir: "data"
   parfile: "0329.par"
-  site: "PO"
+  site: "BADARY"
   verbose: 2
+  buf_size: 10
 
-  #t0: 0.3
-  #t1: 20
+  t0: 0.0
+  t1: 3.0
 
 
 options:
@@ -16,23 +17,30 @@ options:
   ddtype: "coherent"
 
   fold: false
-  #t2pred: "t2pred.dat"
+  t2pred: "t2pred.dat"
 
-  nchann: 4194304
-  #nchann: 512
+  nchann: 33554432
+  #nchann: 32768
   mask: ""
   filter: true          # this only available for incoherent dedispersion
   tail_threshold: .7    # this only available for incoherent dedispersion
   std_threshold: 3      # this only available for incoherent dedispersion
 
   
+# Owerwrite files' headers
 advanced:
-  #fmax: 1260.0
-  #fmin: 1772.0
+  fmin: 1260.0
+  fmax: 1772.0
+  sampling: 1024.0
+  #fmax: 2048.0
+  #fmin: 1024.0
   #sampling: 1024.0
+  dm: 26.776
 
 files:
-  - 010818_0329+54_00adc
+#  - wideband_1024_2048.vdif
+  - rup106_bd_321-1252_ch07.vdif
+#  - 010818_0329+54_00adc
 #  - 020818_0329+54_00adc
 #  - 011022_1133+16_00adc
 #  - 011222_1133+16_00adc

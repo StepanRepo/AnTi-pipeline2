@@ -7,11 +7,14 @@ CXX = g++
 # Compiler flags
 # -Wall: Enable most warning messages
 # -Wextra: Enable extra warning messages
-# -std=c++17: Use C++17 standard (or c++20, c++23 as needed)
-# -O2: Optimize for speed (use -O0 for debugging)
+# -std=c++17: Use C++17 standard 
+# -O3: Optimize for speed (use -O0 for debugging)
 # -g: Include debugging symbols (remove for release build)
 # -fopenmp: Enable to use OpenMP routines
-CXXFLAGS = -Wall -Wextra -std=c++17 -O2 -g -fopenmp -march=native
+CXXFLAGS = -std=c++17 -O3 -fopenmp -march=native
+DEBUG = -fopt-info -g -Wall -Wextra
+
+CXXFLAGS += $(DEBUG)
 
 
 # Include directories (paths where the compiler looks for header files)
@@ -21,7 +24,7 @@ INCLUDES = -I./include -I$(TEMPO2_PREFIX)/include
 # Library flags (paths where the linker looks for libraries and the libraries themselves)
 # -L flag for library paths, -l flag for library names
 # Example: -L/path/to/lib -lfftw3
-LIBS = -lfftw3 -lyaml-cpp -ltempo2pred -ltempo2
+LIBS = -lstdc++fs -lfftw3 -lyaml-cpp -ltempo2pred -ltempo2
 LIBS += -L$(TEMPO2_PREFIX)/lib 
 
 RPATHS = -Wl,-rpath,$(TEMPO2_PREFIX)/lib

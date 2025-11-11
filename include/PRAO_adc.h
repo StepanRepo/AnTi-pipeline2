@@ -73,16 +73,6 @@ class PRAO_adc : public BaseReader
 		// Destructor: Cleans up allocated memory and closes the file.
 		~PRAO_adc() override;
 
-		// Handles conversion from voltage to oservable 
-		// power spectrum -- dynamic spectrum for 
-		// incoherent dedispersion
-		size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num) override;
-
-		// Handles conversion from voltage to oservable 
-		// complex spectrum -- complex dynamic spectrum
-		// for coherent dedispersion
-		size_t fill_1d(fftw_complex *vec, size_t n) override;
-
 		virtual double point2time(size_t point) override;
 		virtual void skip(double sec) override;
 		virtual void set_limit(double t) override; 

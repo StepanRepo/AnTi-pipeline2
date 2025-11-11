@@ -122,15 +122,7 @@ public:
     // Destructor: Cleans up allocated memory and closes the file.
     ~IAA_vdif() override;
 
-	// Handles conversion from voltage to oservable 
-	// power spectrum -- dynamic spectrum for 
-	// incoherent dedispersion
-	size_t fill_2d(double* dyn_spec, size_t time_steps, size_t freq_num) override;
 
-	// Handles conversion from voltage to oservable 
-	// complex spectrum -- complex dynamic spectrum
-	// for coherent dedispersion
-	size_t fill_1d(fftw_complex* vec, size_t n) override;
 
 	// Transforms a number of points, used in the analisys
 	// to corresponding time from the beginning of 

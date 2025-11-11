@@ -17,6 +17,8 @@ class BaseReader
 		size_t buf_pos;                 // Current read position within the main buffer
 		size_t buf_max;                 // Number of valid samples currently in the main buffer
 		size_t buf_size;                // Total allocated size of the main buffer (in samples)
+										//
+		std::streamoff data_start_pos;	// Position in the file where reader should start to read data (either beginning of the data section or is set by skip(t0)) 
 
 
 		// FFT members for processing
@@ -38,13 +40,17 @@ class BaseReader
 		// Pointer to a polymorphic header object
 		BaseHeader* header_ptr = nullptr;
 
+		size_t fill_1d(fftw_complex* vec, size_t n);
+		size_t fill_1d(double* vec, size_t n);
+
+		size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num);
+
+		void reset();
+
 		// Virtual destructor
 		virtual ~BaseReader() = default;
 
 		// Pure virtual methods — must be implemented by derived classes
-		virtual size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num) = 0;
-		virtual size_t fill_1d(fftw_complex* vec, size_t n) = 0;
-
 		virtual double point2time(size_t point) = 0;
 		virtual void skip(double sec) = 0;
 		virtual void set_limit(double t) = 0;

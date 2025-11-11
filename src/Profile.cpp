@@ -1,6 +1,7 @@
 #include "Profile.h"
 #include "PRAO_adc.h"   // full definition of PRAO_adc
 #include "IAA_vdif.h"   // full definition of IAA_vdif
+#include "aux_math.h"
 #include <stdexcept>
 #include <memory>
 #include <algorithm>
@@ -52,6 +53,14 @@ size_t Profile::fill_2d(double* dyn_spec, size_t time_steps, size_t freq_num)
 }
 
 size_t Profile::fill_1d(fftw_complex *vec, size_t n) 
+{
+    if (!reader || !reader->is_open) 
+        throw std::runtime_error("Reader not initialized or file not open");
+
+    return reader->fill_1d(vec, n);
+}
+
+size_t Profile::fill_1d(double *vec, size_t n) 
 {
     if (!reader || !reader->is_open) 
         throw std::runtime_error("Reader not initialized or file not open");
@@ -227,7 +236,7 @@ void Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 	n_DM = static_cast<size_t>(dtmax / tau) + 1;
 	n_DM += n_DM % 2;
 	
-	// set 256 Mib buffer as standard size
+	// set 256 MiB buffer as standard size
 	obs_window = std::max(n_DM, (256ul << 20)/nchann/sizeof(double)); 
 	obs_window += n_DM;
 
@@ -285,7 +294,7 @@ void Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 		{
 			#pragma omp simd
 			for (size_t i = 0; i < nchann; ++i) 
-				post[t * nchann + i] = pre[((t+shift[i])%obs_window)  * nchann + i];
+				post[t * nchann + i] = pre[(t+shift[i])  * nchann + i];
 		}
 
 		// save processed buffer
@@ -342,6 +351,11 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	fftw_complex* dphase;
 	double re, im;
 
+	double *buff;
+	double *t_space;
+	fftw_complex *f_space;
+	fftw_plan fft, ifft;
+
 
 	fmin = reader->header_ptr->fmin;
 	fmax = reader->header_ptr->fmax;
@@ -363,30 +377,27 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 
 	if (reader->header_ptr-> nchann == 1)
 		reader->header_ptr-> tau = 
-			1.0e-3 / reader->header_ptr->sampling;
+			2.0e-3 / reader->header_ptr->sampling;
 
 	tau = reader->header_ptr->tau;
 
-	freqs = new double[2*nchann];
-	dt = new double[2*nchann];
-	dphase = static_cast<fftw_complex*>(fftw_malloc(sizeof(fftw_complex) * 2*nchann));
+	freqs  = (double*)(fftw_malloc(sizeof(double) * (nchann+1)));
+	dt     = (double*)(fftw_malloc(sizeof(double) * (nchann+1)));
+	dphase = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann+1)));
 
 	double df = (fmax - fmin) / nchann;
 
 	#pragma omp simd
-	for (size_t i = 0; i < nchann; ++i)
-		freqs[i] = fmin + df * (static_cast<double>(i));
-	#pragma omp simd
-	for (size_t i = nchann; i < 2*nchann; ++i)
+	for (size_t i = 0; i < nchann+1; ++i)
 		freqs[i] = fmin + df * (static_cast<double>(i));
 
 
 	#pragma omp simd
-	for (size_t i = 0; i < 2*nchann; ++i)
+	for (size_t i = 0; i < nchann+1; ++i)
 		dt[i] = 4.148808e6 * DM * (1.0/freqs[i]/freqs[i] - 1.0/fcomp/fcomp);
 
 	#pragma omp simd
-	for (size_t i = 0; i < 2*nchann; ++i)
+	for (size_t i = 0; i < nchann+1; ++i)
 	{
 		dphase[i][0] = std::cos(-2.0e3 * M_PI * freqs[i] * dt[i]);
 		dphase[i][1] = std::sin(-2.0e3 * M_PI * freqs[i] * dt[i]);
@@ -400,20 +411,18 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	n_DM = static_cast<size_t>(dtmax/tau);
 	n_DM += n_DM % 2;
 
-	if (2*nchann <= n_DM)
-        throw std::runtime_error("The number of channels is too small for coherent dedispersion. Set at least 2^" + std::to_string(size_t(std::log2(n_DM/2)) + 1));
+	if (nchann <= n_DM)
+        throw std::runtime_error("The number of channels is too small for coherent dedispersion. Set at least 2^" + std::to_string(size_t(std::log2(n_DM)) + 1));
 
 	obs_window = 2*nchann;
 
-	fftw_complex *in, *out;
-	fftw_plan fft, ifft;
 
-	in = static_cast<fftw_complex*>(fftw_malloc(sizeof(fftw_complex) * obs_window));
-	out = static_cast<fftw_complex*>(fftw_malloc(sizeof(fftw_complex) * obs_window));
-	sum = new double[obs_window];
+	buff    = (double*) (fftw_malloc(sizeof(double) * obs_window));
+	t_space = (double*) (fftw_malloc(sizeof(double) * obs_window));
+	f_space = (fftw_complex*) (fftw_malloc(sizeof(fftw_complex) * (nchann+1)));
 
-	fft = fftw_plan_dft_1d (obs_window, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
-	ifft = fftw_plan_dft_1d(obs_window, out, out, FFTW_BACKWARD, FFTW_ESTIMATE);
+	fft  = fftw_plan_dft_r2c_1d(obs_window, buff, f_space, FFTW_ESTIMATE);
+	ifft = fftw_plan_dft_c2r_1d(obs_window, f_space, t_space, FFTW_ESTIMATE);
 
 
 	//std::srand(time(NULL));
@@ -423,15 +432,14 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	output = std::ofstream(id);
 
 
-	#pragma omp simd
-	for (size_t i = 0; i < n_DM; ++i)
-	{
-		in[i][0] = 0.0;
-		in[i][1] = 0.0;
-	}
+	size_t filled = fill_1d(buff, 10);
+	double s = 0.0;
 
+	for (size_t i = 0; i < filled; ++i) s += buff[i];
+	s /= double(filled);
 
-	buf_max = n_DM; 
+	std::fill(buff, buff + 2*n_DM + filled, s);
+	buf_max = 2*n_DM + filled; 
 	buf_pos = 0;
 
 	while(true)
@@ -440,15 +448,13 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 		{
 
 			size_t valid_samples = buf_max - buf_pos;
-			size_t bytes_to_copy = valid_samples * sizeof(fftw_complex);
-			std::memmove(in, in + buf_pos, bytes_to_copy);
+			size_t bytes_to_copy = valid_samples * sizeof(double);
+			std::memmove(buff, buff + buf_pos, bytes_to_copy);
 
 			buf_pos = 0;
 			buf_max = valid_samples;
 
-			size_t filled = fill_1d(
-					in + buf_max, 
-					obs_window - buf_max);
+			filled = fill_1d(buff + buf_max, obs_window - buf_max);
 
 			if (filled > 0)
 				buf_max += filled;
@@ -464,13 +470,13 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 		fftw_execute(fft);
 
 #pragma omp simd
-		for (size_t i = 0; i < obs_window; ++i)
+		for (size_t i = 0; i < nchann+1; ++i)
 		{
-			re = out[i][0];
-			im = out[i][1];
+			re = f_space[i][0];
+			im = f_space[i][1];
 
-			out[i][0] = re*dphase[i][0] - im*dphase[i][1];
-			out[i][1] = re*dphase[i][1] + im*dphase[i][0];
+			f_space[i][0] = re*dphase[i][0] - im*dphase[i][1];
+			f_space[i][1] = re*dphase[i][1] + im*dphase[i][0];
 		}
 
 		fftw_execute(ifft);
@@ -478,59 +484,21 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 		#pragma omp simd
 		for (size_t i = 0; i < obs_window; ++i)
 		{
-			re = out[i][0]/obs_window;	// FFT normalization
-			im = out[i][1]/obs_window;	// FFT normalization
-
-			sum[i] = re*re + im*im;
+			t_space[i] = t_space[i]*t_space[i] / double(obs_window)/double(obs_window);	// FFT normalization
 		}
 
-		output.write(reinterpret_cast<const char*>(sum + n_DM),
-				(obs_window - n_DM) * sizeof(double));
+		output.write(reinterpret_cast<const char*>(t_space + 2*n_DM),
+				(obs_window - 2*n_DM) * sizeof(double));
 
-		buf_pos = obs_window - n_DM;
+		buf_pos = obs_window - 2*n_DM;
 	}
-
-	// pad the end with zeros
-	#pragma omp simd
-	for (size_t i = buf_max; i < obs_window; ++i)
-	{
-		in[i][0] = 0.0;
-		in[i][1] = 0.0;
-	}
-	std::cout << "last step" << std::endl;
-
-	fftw_execute(fft);
-
-	#pragma omp simd
-	for (size_t i = 0; i < obs_window; ++i)
-	{
-		re = out[i][0];
-		im = out[i][1];
-
-		out[i][0] = re*dphase[i][0] - im*dphase[i][1];
-		out[i][1] = re*dphase[i][1] + im*dphase[i][0];
-	}
-
-	fftw_execute(ifft);
-
-
-	#pragma omp simd
-	for (size_t i = 0; i < obs_window; ++i)
-	{
-		re = out[i][0]/obs_window;	// FFT normalization
-		im = out[i][1]/obs_window;	// FFT normalization
-
-		sum[i] = re*re + im*im;
-	}
-
-	output.write(reinterpret_cast<const char*>(sum + n_DM),
-			(buf_max - n_DM) * sizeof(double));
 
 	output.close();
 	fftw_destroy_plan(fft);
 	fftw_destroy_plan(ifft);
-	fftw_free(in);
-	fftw_free(out);
+	fftw_free(buff);
+	fftw_free(f_space);
+	fftw_free(t_space);
 }
 
 void Profile::fold_dyn(double P, size_t nchann)
@@ -542,7 +510,7 @@ void Profile::fold_dyn(double P, size_t nchann)
 	size_t obs_window;
 	double tau;
 
-	double *buff = nullptr;
+	double *buff = nullptr, *buff_curr = nullptr;
 	size_t buf_pos, buf_max;
 
 	// vars for time correction
@@ -624,16 +592,8 @@ void Profile::fold_dyn(double P, size_t nchann)
 		}
 
 
-		for (size_t i = 0; i < obs_window; ++i)
-		{
-			#pragma omp simd
-			for (size_t f = 0; f < nchann; ++f)
-			{
-				dyn[i*nchann + f] += buff[buf_pos*nchann + f];
-			}
-			buf_pos += 1;
-			sumidx += 1;	
-		}
+		buff_curr = buff + buf_pos * nchann;
+		math::vec_add(dyn, buff_curr, obs_window*nchann);
 
 		rev += 1;
 
@@ -655,7 +615,6 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
         throw std::runtime_error("Reader not initialized or file not open");
 
 
-
 	// T2predict takes char* as input file path
 	char* pred_file_c = new char[pred_file.length() + 1];
 	strcpy(pred_file_c, pred_file.c_str());
@@ -670,6 +629,9 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 	if (reader->header_ptr->t0 < T2Predictor_GetStartMJD(pred) ||
 			reader->header_ptr->t0 > T2Predictor_GetEndMJD(pred))
         throw std::runtime_error("Date of observation is out of range of predictor dates");
+
+	std::cout << "Integrating pulse using prediction file for " << 
+    T2Predictor_GetSiteName(pred) << " telescope" << std::endl;
 
 
 	double P;
@@ -779,14 +741,9 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 
 
 		buff_curr = buff + buf_pos * nchann;
-		for (size_t i = 0; i < obs_window; ++i)
-		{
-			#pragma omp simd
-			for (size_t f = 0; f < nchann; ++f)
-			{
-				dyn[i*nchann + f] += buff_curr[i*nchann + f];
-			}
-		}
+		
+		math::vec_add(dyn, buff_curr, obs_window*nchann);
+
 
 		buf_pos += obs_window;
 		sumidx += obs_window;	
@@ -815,7 +772,7 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 	buff = nullptr;
 }
 
-double Profile::get_redshift (std::string par_path)
+double Profile::get_redshift (std::string par_path, std::string site)
 {
 	// reading pulsar parameters
     // Initialize pulsar and observation
@@ -831,7 +788,7 @@ double Profile::get_redshift (std::string par_path)
 	readParfile(&psr, &t2_path, nullptr, 1); /* Read .par file to define the pulsar's initial parameters */  
 
     // Set site arrival time and observatory
-	const char* obs_code = "PO";
+	const char* obs_code = site.c_str();
     obs->sat = reader->header_ptr->t0;
     strcpy(obs->telID, obs_code);
 
@@ -861,6 +818,11 @@ double Profile::get_redshift (std::string par_path)
 
 
 	return redshift;
+}
+
+void Profile::get_mask(size_t nchann)
+{
+
 }
 
 

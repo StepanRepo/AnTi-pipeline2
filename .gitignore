@@ -7,3 +7,4 @@ jpl_eph/*
 main
 *.txt
 wisdoms/*
+nohup.out

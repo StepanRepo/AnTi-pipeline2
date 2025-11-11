@@ -36,6 +36,7 @@ class Profile
 		// Forward fill functions
 		size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num);
 		size_t fill_1d(fftw_complex *vec, size_t n);
+		size_t fill_1d(double *vec, size_t n);
 
 		void dedisperse_incoherent (double DM, size_t nchann);
 		void dedisperse_coherent (double DM, size_t nchann);
@@ -43,10 +44,12 @@ class Profile
 		void dedisperse_incoherent_stream (double DM, size_t nchann);
 		void dedisperse_coherent_stream (double DM, size_t nchann);
 
+		void get_mask(size_t nchann);
+
 		void fold_dyn(double P, size_t nchann);
 		void fold_dyn(std::string pred_file, size_t nchann);
 
-		double get_redshift (std::string par_path);
+		double get_redshift (std::string par_path, std::string site);
 
 		// Access header info
 		BaseHeader* getHeader();

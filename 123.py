@@ -1,4 +1,4 @@
-#! /bin/python
+#! venv/bin/python
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -27,9 +27,9 @@ if __name__ == "__main__":
 
     for filename in path.glob("*.bin"):
         print(f"Processing {filename.stem}")
-        binning = 1024
-        tau = 0.000200089*binning
-        print(tau)
+        binning = 2**20
+        tau = 9.765625e-7*binning
+        print(f"{tau} ms")
 
 # Read as flat array, then reshape
         data = np.fromfile(filename, dtype=np.float64)
@@ -41,21 +41,31 @@ if __name__ == "__main__":
         plt.title(filename.stem)
         plt.plot(t, data)
         plt.xlabel("t, ms")
+        plt.ylim(1.850, 1.950)
 
         P = 0.71446991958999994665
         obs_window = int(P*1e3 / tau);
         int_prf = np.zeros(obs_window)
         skip = 0
+        summed = 0
 
         plt.figure()
-        for i in range(len(data)//obs_window):
+        for i in range(int(t[-1]*1e-3 / P)):
+            print(f"rev: {i}")
             skip = int(i*(P*1e3/tau - obs_window) + .5)
             temp = data[i*obs_window + skip: (i+1)*obs_window + skip]
             int_prf += temp
 
             plt.plot(t[:obs_window], temp)
+            plt.ylim(1.850, 1.950)
+
+            summed += 1
+
+
+        int_prf = int_prf/summed
 
         plt.figure()
         plt.plot(t[:obs_window], int_prf)
+        plt.ylim(1.850, 1.950)
     
     save_image("123.pdf")
