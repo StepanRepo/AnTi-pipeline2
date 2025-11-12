@@ -131,8 +131,6 @@ int main()
 		BaseHeader* hdr = profile.getHeader();
 		if (!hdr) 
 			throw std::runtime_error("Header not available");
-		else
-			hdr->print();
 
 		if (config["advanced"])
 		{
@@ -144,6 +142,9 @@ int main()
 				hdr-> update_header(key, value);
 			}
 		}
+
+
+		hdr->print();
 
 
 		if (config["general"]["t0"] && !config["general"]["t0"].IsNull())
@@ -165,9 +166,10 @@ int main()
 		if (mode == "dedisperse")
 		{
 			size_t nchann = config["options"]["nchann"].as<size_t>();
-			std::string mask_file
+			std::string mask_file = "";
 
-			if (config["options"] && config["options"]["t2pred"]) 
+			if (config["options"] && config["options"]["mask"]) 
+				mask_file = config["options"]["mask"].as<std::string>();
 
 
 			if (config["options"]["fold"].as<bool>())

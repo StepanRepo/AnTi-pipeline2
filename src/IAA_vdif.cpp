@@ -359,13 +359,16 @@ void IAA_vdif::unpack_nbit_to_double(
 		int n) 
 {
 	size_t bit_pos = 0; // Tracks the current bit position in the input stream
+						//
+	double middle = double((1 << n) - 1)/2.0;
 
 	for (size_t i = 0; i < num_elements; ++i) 
 	{
 		uint32_t value = 0; // Temporary storage for the unpacked N-bit value
 
 		// Extract 'n' bits for the current sample
-		for (int bit = 0; bit < n; ++bit) {
+		for (int bit = 0; bit < n; ++bit) 
+		{
 			size_t byte_idx = bit_pos >> 3;           // Calculate the byte index (bit_pos / 8)
 			size_t bit_idx  = bit_pos & 7;            // Calculate the bit index within the byte (bit_pos % 8)
 			uint8_t byte_val = static_cast<uint8_t>(input[byte_idx]); // Read the byte
@@ -376,7 +379,7 @@ void IAA_vdif::unpack_nbit_to_double(
 		}
 
 		// Convert the packed integer value to a double and store it
-		output[i] = static_cast<double>(value);
+		output[i] = static_cast<double>(value) - middle;
 	}
 }
 

@@ -352,9 +352,19 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	double re, im;
 
 	double *buff;
-	double *t_space;
-	fftw_complex *f_space;
+	fftw_complex *f_space, *t_space;
 	fftw_plan fft, ifft;
+	
+
+	fftw_plan p;
+	fftw_complex *f_small, *t_small;
+	size_t freq_num = 2048;
+	double *spec;
+
+	f_small = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (freq_num)));
+	t_small = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (freq_num)));
+	spec = (double*)(fftw_malloc(sizeof(double) * (freq_num)));
+	p  = fftw_plan_dft_1d(freq_num, t_small, f_small, FFTW_FORWARD, FFTW_ESTIMATE);
 
 
 	fmin = reader->header_ptr->fmin;
@@ -386,22 +396,26 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	dphase = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann+1)));
 
 	double df = (fmax - fmin) / nchann;
-
-	#pragma omp simd
-	for (size_t i = 0; i < nchann+1; ++i)
-		freqs[i] = fmin + df * (static_cast<double>(i));
+	double phase = 0.0;
+	double sign = fmin > fmax ? 1.0 : -1.0;
 
 
 	#pragma omp simd
 	for (size_t i = 0; i < nchann+1; ++i)
-		dt[i] = 4.148808e6 * DM * (1.0/freqs[i]/freqs[i] - 1.0/fcomp/fcomp);
+		freqs[i] = df * (static_cast<double>(i) + .5);
+
 
 	#pragma omp simd
 	for (size_t i = 0; i < nchann+1; ++i)
 	{
-		dphase[i][0] = std::cos(-2.0e3 * M_PI * freqs[i] * dt[i]);
-		dphase[i][1] = std::sin(-2.0e3 * M_PI * freqs[i] * dt[i]);
+		phase = sign * 2.0e3 * M_PI * 4.148808e6 * DM * freqs[i] * freqs[i] /
+			(fmin * fmin * (fmin + freqs[i]));
+
+		dphase[i][0] = std::cos(phase);
+		dphase[i][1] = std::sin(phase);
 	}
+
+
 
 	double dtmax = *std::max_element(dt, dt + nchann,
 			[](const double& a, const double& b)
@@ -410,6 +424,7 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 			});
 	n_DM = static_cast<size_t>(dtmax/tau);
 	n_DM += n_DM % 2;
+	//n_DM *= 2;
 
 	if (nchann <= n_DM)
         throw std::runtime_error("The number of channels is too small for coherent dedispersion. Set at least 2^" + std::to_string(size_t(std::log2(n_DM)) + 1));
@@ -418,11 +433,12 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 
 
 	buff    = (double*) (fftw_malloc(sizeof(double) * obs_window));
-	t_space = (double*) (fftw_malloc(sizeof(double) * obs_window));
+	sum     = (double*) (fftw_malloc(sizeof(double) * nchann));
+	t_space = (fftw_complex*) (fftw_malloc(sizeof(fftw_complex) * (nchann)));
 	f_space = (fftw_complex*) (fftw_malloc(sizeof(fftw_complex) * (nchann+1)));
 
 	fft  = fftw_plan_dft_r2c_1d(obs_window, buff, f_space, FFTW_ESTIMATE);
-	ifft = fftw_plan_dft_c2r_1d(obs_window, f_space, t_space, FFTW_ESTIMATE);
+	ifft = fftw_plan_dft_1d(nchann, f_space, t_space, FFTW_BACKWARD, FFTW_ESTIMATE);
 
 
 	//std::srand(time(NULL));
@@ -432,14 +448,9 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	output = std::ofstream(id);
 
 
-	size_t filled = fill_1d(buff, 10);
-	double s = 0.0;
-
-	for (size_t i = 0; i < filled; ++i) s += buff[i];
-	s /= double(filled);
-
-	std::fill(buff, buff + 2*n_DM + filled, s);
-	buf_max = 2*n_DM + filled; 
+	std::fill(buff, buff + 2*n_DM, 0.0);
+	//buf_max = 2*n_DM; 
+	buf_max = 0;
 	buf_pos = 0;
 
 	while(true)
@@ -454,7 +465,7 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 			buf_pos = 0;
 			buf_max = valid_samples;
 
-			filled = fill_1d(buff + buf_max, obs_window - buf_max);
+			size_t filled = fill_1d(buff + buf_max, obs_window - buf_max);
 
 			if (filled > 0)
 				buf_max += filled;
@@ -482,21 +493,85 @@ void Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 		fftw_execute(ifft);
 
 		#pragma omp simd
-		for (size_t i = 0; i < obs_window; ++i)
+		for (size_t i = 0; i < nchann; ++i)
 		{
-			t_space[i] = t_space[i]*t_space[i] / double(obs_window)/double(obs_window);	// FFT normalization
+			re = t_space[i][0]/double(obs_window);
+			im = t_space[i][1]/double(obs_window);
+
+			sum[i] = re*re + im*im;
 		}
 
-		output.write(reinterpret_cast<const char*>(t_space + 2*n_DM),
-				(obs_window - 2*n_DM) * sizeof(double));
+		output.write(reinterpret_cast<const char*>(sum + n_DM),
+						(nchann - n_DM) * sizeof(double));
 
-		buf_pos = obs_window - 2*n_DM;
+		/******************************************
+		 * This part allows to plot output spectrum
+		 * for the processed chunk. It is used for debugging
+		 ******************************************
+		 */
+		 
+		 
+		//for (size_t i = 0; i < nchann/freq_num; ++i)
+		//{
+		//	for (size_t k = 0; k < freq_num; ++k)
+		//	{
+		//		t_small[k][0] = t_space[i*freq_num + k][0];
+		//		t_small[k][1] = t_space[i*freq_num + k][1];
+		//	}
+
+		//	fftw_execute(p);
+
+		//	for (size_t k = 0; k < freq_num; ++k)
+		//	{
+		//		re = f_small[k][0];
+		//		im = f_small[k][1];
+
+		//		spec[k] = re*re + im*im;
+		//	}
+
+		//	output.write(reinterpret_cast<const char*>(spec),
+		//			(freq_num) * sizeof(double));
+		//}
+			buf_pos = obs_window - 2*n_DM;
+
 	}
+/*
+	std::fill(buff + buf_max, buff + obs_window, 0.0);
+
+	std::cout << "last step" << std::endl;
+
+	fftw_execute(fft);
+
+#pragma omp simd
+	for (size_t i = 0; i < nchann+1; ++i)
+	{
+		re = f_space[i][0];
+		im = f_space[i][1];
+
+		f_space[i][0] = re*dphase[i][0] - im*dphase[i][1];
+		f_space[i][1] = re*dphase[i][1] + im*dphase[i][0];
+	}
+
+	fftw_execute(ifft);
+
+#pragma omp simd
+	for (size_t i = 0; i < nchann; ++i)
+	{
+		re = t_space[i][0]/double(obs_window);
+		im = t_space[i][1]/double(obs_window);
+
+		sum[i] = re*re + im*im;
+	}
+
+	output.write(reinterpret_cast<const char*>(sum + n_DM),
+			(buf_max/2 - n_DM) * sizeof(double));
+			*/
 
 	output.close();
 	fftw_destroy_plan(fft);
 	fftw_destroy_plan(ifft);
 	fftw_free(buff);
+	fftw_free(sum);
 	fftw_free(f_space);
 	fftw_free(t_space);
 }

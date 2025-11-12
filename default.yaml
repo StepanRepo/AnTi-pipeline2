@@ -1,14 +1,15 @@
 general:
   mode: "dedisperse"
-  input_dir: "data"
+  input_dir: "/mnt/prognoz-nas/data/rup106/bd_msps/"
+  #input_dir: "data"
   output_dir: "data"
-  parfile: "0329.par"
+  #parfile: "0329.par"
   site: "BADARY"
   verbose: 2
   buf_size: 10
 
-  t0: 0.0
-  t1: 3.0
+  t0: 283.0
+  t1: 284.0
 
 
 options:
@@ -20,7 +21,7 @@ options:
   t2pred: "t2pred.dat"
 
   nchann: 33554432
-  #nchann: 32768
+  #nchann: 8192
   mask: ""
   filter: true          # this only available for incoherent dedispersion
   tail_threshold: .7    # this only available for incoherent dedispersion
@@ -32,15 +33,19 @@ advanced:
   fmin: 1260.0
   fmax: 1772.0
   sampling: 1024.0
-  #fmax: 2048.0
-  #fmin: 1024.0
+  dm: 71.0155
+  #dm: 26.776
+  #fmin: 2675.8
+  #fmax: 2163.8
   #sampling: 1024.0
-  dm: 26.776
+  #dm: 56.7712
 
 files:
+#  - Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif 
+  - rup106_bd_321-1104_ch07.vdif
 #  - wideband_1024_2048.vdif
-  - rup106_bd_321-1252_ch07.vdif
-#  - 010818_0329+54_00adc
+#  - rup106_bd_321-1252_ch07.vdif
+#- 010818_0329+54_00adc
 #  - 020818_0329+54_00adc
 #  - 011022_1133+16_00adc
 #  - 011222_1133+16_00adc

@@ -28,16 +28,15 @@ if __name__ == "__main__":
     for filename in path.glob("*.bin"):
         print(f"Processing {filename.stem}")
 
-        freq_num = 32768
+        freq_num = 2048
         sampling = 1024*u.MHz 
-        binning = 64
+        binning = 16
 
 # Read as flat array, then reshape
         data = np.fromfile(filename, dtype=np.float64)
         data_2d = data.reshape(-1, freq_num)
         data_2d = bin_time(data_2d, binning).T
 
-        data_2d = data_2d[:, :-100]
         
         
 
@@ -87,6 +86,7 @@ if __name__ == "__main__":
 
         ax[1, 1].set_visible(False)
         ax[0, 0].sharex(ax[1, 0]) 
+
 
 
 
