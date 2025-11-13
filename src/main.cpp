@@ -117,7 +117,7 @@ int main()
 	output_dir = resolve_path(output_dir);
 
 
-	std::string format = "IAA_vdif";
+	std::string format = "PRAO_adc";
 
 
 	for (const auto& filename_yaml : config["files"]) 

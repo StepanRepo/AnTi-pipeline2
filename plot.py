@@ -29,8 +29,8 @@ if __name__ == "__main__":
         print(f"Processing {filename.stem}")
 
         freq_num = 2048
-        sampling = 1024*u.MHz 
-        binning = 16
+        sampling = 5*u.MHz 
+        binning = 1
 
 # Read as flat array, then reshape
         data = np.fromfile(filename, dtype=np.float64)
@@ -117,6 +117,9 @@ if __name__ == "__main__":
                         vmin = lower,
                         vmax = upper,
                         )
+
+        ax[0, 0].axvline(tl[2**21 // freq_num].to_value(u.ms), c = "C3")
+        ax[0, 0].axvline(tl[(2**21 - 1019548) // freq_num].to_value(u.ms), c = "k", ls = "--")
 
 
         ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))
