@@ -12,7 +12,7 @@ CXX = g++
 # -g: Include debugging symbols (remove for release build)
 # -fopenmp: Enable to use OpenMP routines
 CXXFLAGS = -std=c++17 -O3 -fopenmp -march=native
-DEBUG = -fopt-info -g -Wall -Wextra
+DEBUG = -g -Wall -Wextra #-fopt-info 
 
 CXXFLAGS += $(DEBUG)
 
@@ -24,7 +24,7 @@ INCLUDES = -I./include -I$(TEMPO2_PREFIX)/include
 # Library flags (paths where the linker looks for libraries and the libraries themselves)
 # -L flag for library paths, -l flag for library names
 # Example: -L/path/to/lib -lfftw3
-LIBS = -lstdc++fs -lfftw3 -lyaml-cpp -ltempo2pred -ltempo2
+LIBS = -lstdc++fs -lfftw3 -lyaml-cpp -ltempo2pred -ltempo2 -lcfitsio
 LIBS += -L$(TEMPO2_PREFIX)/lib 
 
 RPATHS = -Wl,-rpath,$(TEMPO2_PREFIX)/lib

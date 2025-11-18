@@ -18,7 +18,14 @@ namespace math
  * @note Arrays must be non-overlapping except where a == destination.
  */
 void vec_add(double* a, double* b, size_t n);
+void vec_sub(double* a, double* b, size_t n);
+void vec_prod(double* a, double* b, size_t n);
+void vec_div(double* a, double* b, size_t n);
 
+double mean(double* a, size_t n);
+double var(double *a, size_t n, double ddof = 0.0);
+
+void sigmaclip(double *a, bool *mask, size_t n, double threshold);
 } // namespace math
 
 #endif // AUX_MATH_H

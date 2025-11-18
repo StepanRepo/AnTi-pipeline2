@@ -111,6 +111,7 @@ class IAA_vdif : public BaseReader
 
 public:
     // Public member to hold the current frame's header information
+	VDIFHeader current_header;
     VDIFHeader header;
 
     // Constructor: Opens the file, reads the first header to initialize internal structures.

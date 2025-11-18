@@ -239,8 +239,9 @@ void VDIFHeader::decode(const char* byte_array)
 // Constructor implementation.
 // Opens the file, reads the *first* frame, initializes buffers and FFTW plan based on the first frame's parameters.
 IAA_vdif::IAA_vdif(const std::string& filename_in, size_t buffer_size):
-	BaseReader(), header{} // Initialize the base class part first 
+	BaseReader(), current_header{}, header{} // Initialize the base class part first 
 {
+		std::cout << 123 << std::endl; 
 		// CRITICAL: Define base class member
 		// to point at the right header
 		header_ptr = &header;
@@ -266,6 +267,7 @@ IAA_vdif::IAA_vdif(const std::string& filename_in, size_t buffer_size):
 		if (state & std::ios_base::eofbit) 
 			throw std::runtime_error("File is empty or header could not be read: " + filename);
 		header.decode(h_buffer); // Decode the header struct from the first frame
+		current_header.decode(h_buffer); // Decode the header struct from the first frame
 		uint32_t n_samples = header.n_samples; // Get the number of samples from the decoded header
 		header.t0 = header.t; // Store the time of the first frame for relative calculations
 		header.nchann = 1;
@@ -274,11 +276,12 @@ IAA_vdif::IAA_vdif(const std::string& filename_in, size_t buffer_size):
 		// Find the total size of observation (number of points)
 		file.seekg(0, std::ios::end); // Move the read pointer to the end of the file
 		size_t tot = file.tellg();
+		// Set the corresponding header field
+		header.OBS_SIZE = tot / header.frame_length * header.n_samples;
+
 		file.seekg(0, std::ios::beg); // Move the read pointer to the beginning of the file
 		data_start_pos = static_cast<std::streamoff>(0);
 
-		// Set the corresponding header field
-		header.OBS_SIZE = tot / header.frame_length * header.n_samples;
 
 		if (header.legacy_mode)
 		{
@@ -409,22 +412,27 @@ bool IAA_vdif::read_frame()
 		return false; // Indicate EOF reached
 
 	// Decode the header for this frame
-	header.decode(h_buffer);
+	current_header.decode(h_buffer);
 
 	// Calculate the number of bytes representing the sample data in this frame
-	data_bytes = (header.n_samples * header.bits_per_sample) / 8U;
+	data_bytes = (current_header.n_samples * current_header.bits_per_sample) / 8U;
 
 	// Read the raw data bytes for this frame into the temporary raw_data buffer
 	// Note: This assumes raw_data buffer is large enough for *any* frame in the file,
 	// which is guaranteed if all frames have the same parameters as the first one.
 	file.read(raw_data, data_bytes);
-
+    size_t actually_read = static_cast<size_t>(file.gcount());
+	
+    if (actually_read == 0) 
+	{
+        return false; // eof or error occurred during read
+	}
 
 	// Unpack the raw N-bit data into double precision and append it to the main buffer
-	unpack_nbit_to_double(raw_data, buffer + buf_max, header.n_samples, header.bits_per_sample);
+	unpack_nbit_to_double(raw_data, buffer + buf_max, current_header.n_samples, current_header.bits_per_sample);
 
 	// Update the maximum fill level of the main buffer
-	buf_max += header.n_samples;
+	buf_max += current_header.n_samples;
 
 	return true; // Successfully read and appended one frame
 }
@@ -461,7 +469,6 @@ bool IAA_vdif::fill_buffer()
 	{ // Keep calling read_frame until it returns false (EOF or buffer full)
 		t_cur = (header.t - header.t0) * 86400.0L; // Get current frame time in seconds
 		n_read += header.n_samples;
-
 
 		// Check if there's a significant gap in time between the previous and current frame
 		if (t_cur - t_prev > 1.001 * time_step) 

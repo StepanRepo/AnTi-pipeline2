@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 import astropy.units as u
 from astropy.time import Time
+from astropy.io import fits
 from scipy.stats import sigmaclip
 
 def bin_time(data, bin_size):
@@ -18,57 +19,101 @@ def bin_time(data, bin_size):
     
     return reshaped.sum(axis=1)
 
+def read_dyn(filename):
+    """
+    Read a fold-mode PSRFITS file and return dynamic spectrum as a 3D array:
+    (nsubint, nchan, nbin)
+    Also returns frequency array (MHz) and time array (s).
+    """
+    with fits.open(filename, memmap=True) as hdul:
+        # Check observation mode
+        primary_hdr = hdul[0].header
+        if primary_hdr.get('OBS_MODE', '').strip() != 'PSR':
+            raise ValueError("File is not in fold-mode (OBS_MODE != 'PSR')")
+
+        subint_hdu = hdul['SUBINT']
+        header = subint_hdu.header
+
+        nsubint = header['NAXIS2']
+        nchan   = header['NCHAN']
+        nbin    = header['NBIN']
+        npol    = header['NPOL']
+
+        print(f"File contains {len(hdul)} subints, {nchan} channels, {nbin} bins, {npol} pols")
+
+        # Read data and metadata
+        data     = subint_hdu.data['DATA']           # Shape: (nsubint, nbin, nchan, npol)
+        dat_freq = subint_hdu.data['DAT_FREQ']       # Shape: (nsubint, nchan)
+        dat_wts  = subint_hdu.data['DAT_WTS']        # Shape: (nsubint, nchan)
+        dat_scl  = subint_hdu.data['DAT_SCL']        # Shape: (nsubint, nchan*npol)
+        dat_offs = subint_hdu.data['DAT_OFFS']       # Shape: (nsubint, nchan*npol)
+        tsubint  = subint_hdu.data['TSUBINT']        # Duration of each subint
+        tau      = subint_hdu.header['TBIN']
+
+        # Reconstruct real-valued data
+        # Reshape scale/offset to (nsubint, nchan, npol)
+        data = data.reshape(nsubint, nbin, nchan, npol)
+        dat_wts = dat_wts.reshape(nsubint, nchan)
+        dat_scl  = dat_scl.reshape(nsubint, nchan, npol)
+        dat_offs = dat_offs.reshape(nsubint, nchan, npol)
+
+        # Cast DATA to float and apply scale/offset
+        # PSRFITS stores data in (bin, chan, pol) order
+        real_data = data.astype(np.float64) 
+        real_data = real_data * dat_scl + dat_offs
+
+        # Collapse polarization (if needed) — assume Stokes I = sum of pols
+        if npol > 1:
+            real_data = real_data.sum(axis=-1)  # Shape: (nsubint, nbin, nchan)
+        else:
+            real_data = real_data[..., 0]       # Shape: (nsubint, nbin, nchan)
+
+        # Transpose to (nsubint, nchan, nbin) for easier plotting
+        dynamic_spectrum = np.transpose(real_data, (0, 2, 1))  # (subint, chan, bin)
+
+        # Compute time axis (seconds from start)
+        offs_sub = subint_hdu.data['OFFS_SUB']  # Center time of each subint
+        t0 = offs_sub - tsubint / 2.0       # Start time of each subint
+        time_s = t0 + np.arange(nbin)*tau
+
+        # Use frequency from first subint (assumed constant)
+        freq_mhz = dat_freq[0]  # Shape: (nchan,)
+
+        return dynamic_spectrum, freq_mhz, time_s
 
 
 
 if __name__ == "__main__":
-    path = Path("data")
     path = Path(".")
+    path = Path("data")
 
-    for filename in path.glob("*.bin"):
+    for filename in path.glob("*.psrfits"):
         print(f"Processing {filename.stem}")
 
-        freq_num = 2048
-        sampling = 5*u.MHz 
         binning = 1
 
-# Read as flat array, then reshape
-        data = np.fromfile(filename, dtype=np.float64)
-        data_2d = data.reshape(-1, freq_num)
-        data_2d = bin_time(data_2d, binning).T
+        data_2d, freqs, tl = read_dyn(filename)
+        data_2d = data_2d[0, :, :]
+        data_2d = bin_time(data_2d, binning)
 
+        tl = tl * u.s
+        freqs = freqs * u.MHz
         
-        
-
-
-        #fmax = 1772.00 
-        fmin = 0 * u.MHz
-        fmax = 1 * u.MHz
-
         nchan = data_2d.shape[0]
-        tau = (nchan / sampling).to(u.us) * binning * 2
-        delta_f = (fmax - fmin) / (nchan)
-
-        tl = np.arange(data_2d.shape[1])*tau
-        freqs = fmax - np.arange(nchan)[::-1] * delta_f
-
         fr = np.sum(data_2d, axis = 1)
-        tails_mask = fr > .5*np.median(fr)
+        #tails_mask = fr > .5*np.median(fr)
 
-        diff = np.diff(np.log(fr))
-        diff = np.concat([diff, [0.0]])
-        masked, lower, upper = sigmaclip(diff, 3, 3)
-        mask = (diff > lower) & (diff < upper)
+        #diff = np.diff(np.log(fr))
+        #diff = np.concat([diff, [0.0]])
+        #masked, lower, upper = sigmaclip(diff, 3, 3)
+        #mask = (diff > lower) & (diff < upper)
 
-        mask = mask & tails_mask
-        #mask[:] = 1
-
-
+        #mask = mask & tails_mask
+        ##mask[:] = 1
 
 
-
-        data_2d = data_2d / np.sum(data_2d, axis = 1)[:, np.newaxis]
-        data_2d[~mask, :] = np.nan
+        #data_2d = data_2d / np.sum(data_2d, axis = 1)[:, np.newaxis]
+        #data_2d[~mask, :] = np.nan
 
         
 
@@ -89,12 +134,6 @@ if __name__ == "__main__":
 
 
 
-
-
-
-
-        data_2d[~mask, :] = np.nanmedian(data_2d)
-
         sig = 3
         clipped, lower, upper = sigmaclip(data_2d, sig, sig)
 
@@ -103,7 +142,7 @@ if __name__ == "__main__":
             clipped, lower, upper = sigmaclip(data_2d, sig, sig)
             print(sig, upper, lower)
 
-            if sig > 100:
+            if sig > 10:
                 break
             
 
@@ -116,21 +155,16 @@ if __name__ == "__main__":
                         extent = extent,
                         vmin = lower,
                         vmax = upper,
+                        interpolation = "none",
                         )
-
-        ax[0, 0].axvline(tl[2**21 // freq_num].to_value(u.ms), c = "C3")
-        ax[0, 0].axvline(tl[(2**21 - 1019548) // freq_num].to_value(u.ms), c = "k", ls = "--")
-
 
         ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))
 
 
-
-
         ax[0, 1].set_xscale("log")
         ax[0, 1].plot(fr, freqs)
-        fr[~mask] = np.nan
-        ax[0, 1].plot(fr, freqs)
+        #fr[~mask] = np.nan
+        #ax[0, 1].plot(fr, freqs)
 
 
         ax[0, 1].set_yticks([])
@@ -147,4 +181,4 @@ if __name__ == "__main__":
 
 
 
-    save_image("123.pdf")
+    save_image("plot.pdf")

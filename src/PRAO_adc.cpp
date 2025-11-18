@@ -281,7 +281,7 @@ PRAO_adc::PRAO_adc(const std::string& filename_in, size_t buffer_size):
     file.seekg(0);
     file.read(h_buff, numpar * 40);
 
-	data_start_pos = static_cast<std::streamoff>(header.numpar * 40);
+	data_start_pos = static_cast<std::streamoff>(numpar * 40);
 
     // fill the header
     header.decode(h_buff);
@@ -415,7 +415,7 @@ bool PRAO_adc::fill_buffer()
     size_t actually_read = static_cast<size_t>(file.gcount());
 
     if (actually_read == 0) 
-        return false; // EOF or error occurred during read
+        return false; // eof or error occurred during read
 
     // Convert ONLY the newly read samples from int8_t to double
     // The loop processes data starting from 'buf_max'

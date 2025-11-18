@@ -8,8 +8,11 @@ void BaseReader::reset()
 	if (!file.is_open())
 		throw std::runtime_error("File is not open");
 
+	// Reset the file state
+	file.clear();
 	file.seekg(data_start_pos, std::ios::beg);
-	// Optionally reset buffer state
+
+	// Reset the buffer state
 	buf_pos = 0;
 	buf_max = 0;
 }	

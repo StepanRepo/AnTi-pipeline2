@@ -9,7 +9,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <yaml-cpp/yaml.h>
+
 #include "Profile.h" 
+#include "PSRFITS_Writer.h"
 
 std::string resolve_path(const std::string& input) 
 {
@@ -74,6 +76,20 @@ std::string resolve_path(const std::string& input)
 	}
 }
 
+std::string get_format(const std::string &filename)
+{
+	if (filename.length() >= 3 && 
+			filename.substr(filename.length() - 3) == "adc") 
+	{
+		return "PRAO_adc";
+	}
+	if (filename.length() >= 5 && 
+			filename.substr(filename.length() - 5) == ".vdif") {
+		return "IAA_vdif";
+	}
+
+	return "Unknown";
+}
 
 
 YAML::Node config;
@@ -101,6 +117,7 @@ int main()
 	std::string parfile, ehemeris;
 	int verbose;
 	double buf_size;
+	bool save_raw, save_dyn, save_sum;
 
 	mode = config["general"]["mode"].as<std::string>();
 	input_dir = config["general"]["input_dir"].as<std::string>() + "/";
@@ -117,16 +134,36 @@ int main()
 	output_dir = resolve_path(output_dir);
 
 
-	std::string format = "PRAO_adc";
+	std::string format = "Unknown";
+	save_raw = false;
+	save_dyn = false;
+	save_sum = false;
 
+
+	if (config["general"]["save_raw"] && !config["general"]["save_raw"].IsNull())
+		save_raw = config["general"]["save_raw"].as<bool>();
+
+	if (config["general"]["save_dyn"] && !config["general"]["save_dyn"].IsNull())
+		save_dyn = config["general"]["save_dyn"].as<bool>();
+
+	if (config["general"]["save_sum"] && !config["general"]["save_sum"].IsNull())
+		save_sum = config["general"]["save_sum"].as<bool>();
 
 	for (const auto& filename_yaml : config["files"]) 
 	{
 
 		filename = filename_yaml.as<std::string>();
+		format = get_format(filename);
+
 
 		Profile profile(input_dir + filename, format, 
-				size_t(buf_size * 1024 * 1024 * 1024)); 
+				size_t(buf_size * 1024 * 1024 * 1024),
+				save_raw, save_dyn, save_sum); 
+
+		PSRFITS_Writer writer(profile, output_dir + filename + ".psrfits");
+
+		if (save_raw || save_dyn || save_sum)
+			writer.createPrimaryHDU();
 
 		BaseHeader* hdr = profile.getHeader();
 		if (!hdr) 
@@ -145,7 +182,6 @@ int main()
 
 
 		hdr->print();
-
 
 		if (config["general"]["t0"] && !config["general"]["t0"].IsNull())
 			profile.reader->skip(config["general"]["t0"].as<double>());
@@ -167,9 +203,26 @@ int main()
 		{
 			size_t nchann = config["options"]["nchann"].as<size_t>();
 			std::string mask_file = "";
+			double sig_threshold, tail_threshold;
 
 			if (config["options"] && config["options"]["mask"]) 
-				mask_file = config["options"]["mask"].as<std::string>();
+				if(!config["options"]["mask"].IsNull())
+					mask_file = config["options"]["mask"].as<std::string>();
+
+			if (mask_file == "" && config["options"] && config["options"]["filter"])
+			{
+				if (config["options"]["filter"].as<bool>())
+				{
+					if (config["options"]["tail_threshold"].IsNull())
+						throw std::runtime_error("Tail threshold should be provided to perform filtration");
+
+					if (config["options"]["std_threshold"].IsNull())
+						throw std::runtime_error("STD threshold should be provided to perform filtration");
+					sig_threshold = config["options"]["std_threshold"].as<double>();
+					tail_threshold = config["options"]["tail_threshold"].as<double>();
+					profile.create_mask(nchann, sig_threshold, tail_threshold);
+				}
+			}
 
 
 			if (config["options"]["fold"].as<bool>())
@@ -180,49 +233,56 @@ int main()
 					if (! config["options"]["t2pred"].IsNull()) 
 						t2_pred_file = config["options"]["t2pred"].as<std::string>();
 
-
-
-				if (t2_pred_file != "")
-				{
-					profile.fold_dyn(
-							input_dir + config["options"]["t2pred"].as<std::string>(), 
-							nchann);
-				}
-				else 
-				{
-					profile.fold_dyn(hdr->period, nchann);
-				}
-
-				std::ofstream raw_out (output_dir + filename + "_dyn.bin");
-				raw_out.write(reinterpret_cast<const char*>(profile.dyn),
-						hdr->nchann * hdr->obs_window * sizeof(double));
-				raw_out.close();
-				
 				if (config["options"]["ddtype"].as<std::string>() == "incoherent")
 				{
+
+					if (t2_pred_file != "")
+					{
+						profile.fold_dyn(
+								input_dir + config["options"]["t2pred"].as<std::string>(), 
+								nchann);
+
+					}
+					else 
+					{
+						profile.fold_dyn(hdr->period, nchann);
+					}
+
 					profile.dedisperse_incoherent(hdr->dm, nchann);
 
-					std::ofstream dd_out (output_dir + filename + "_dd.bin");
-					dd_out.write(reinterpret_cast<const char*>(profile.dyn),
-							hdr->nchann * hdr->obs_window * sizeof(double));
-					dd_out.close();
+
 				}
 				else if (config["options"]["ddtype"].as<std::string>() == "coherent")
 				{
 					profile.dedisperse_coherent(hdr->dm, nchann);
 				}
 				else
+				{
 					throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
+				}
+
+
+				// save the results in fold mode
+				if(save_raw)
+					writer.append_subint_fold(profile.raw, hdr->obs_window, hdr->nchann, 1);
+
+				if(save_dyn)
+					writer.append_subint_fold(profile.dyn, hdr->obs_window, hdr->nchann, 1);
+
+				if(save_sum)
+					writer.append_subint_fold(profile.sum, hdr->obs_window, 1, 1);
 			}
 			else
 			{
+				std::string id = "";
+
 				if (config["options"]["ddtype"].as<std::string>() == "incoherent")
 				{
-					profile.dedisperse_incoherent_stream (hdr->dm, nchann);
+					id = profile.dedisperse_incoherent_stream (hdr->dm, nchann);
 				}
 				else if (config["options"]["ddtype"].as<std::string>() == "coherent")
 				{
-					profile.dedisperse_coherent_stream (hdr->dm, nchann);
+					id = profile.dedisperse_coherent_stream (hdr->dm, nchann);
 				}
 				else
 					throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
@@ -231,18 +291,7 @@ int main()
 
 
 		}
-
-
-		//profile.fold_dyn("t2pred.dat", freq_num);
-		//profile.dedisperse_incoherent(hdr->dm);
 	}
-
-	// Access common header info via polymorphic interface
-
-
-	//profile.dedisperse_coherent(56.7365);
-	//profile.fold_dyn("t2pred.dat", freq_num);
-	//profile.dedisperse_incoherent(hdr->dm);
 
 
 	return 0;

@@ -18,19 +18,25 @@ class Profile
 	public:
 		std::unique_ptr<BaseReader> reader;
 
+		double *raw;
 		double *dyn;
 		fftw_complex *dync;
 		double *sum;
 		double *fr;
 		double *mask;
-		double *int_prf;
 
 		double redshift;
+		size_t sumidx;
+
+		bool save_raw, save_dyn, save_sum;
 
 		// Construct from filename + format
 		Profile(const std::string& filename, 
 				const std::string& format, 
-				size_t buffer_size = 1024 * 1024 * 1024 // Standard size: 1 GiB
+				size_t buffer_size = 1024 * 1024 * 1024, // Standard size: 1 GiB
+				bool save_raw_in = false, 
+				bool save_dyn_in = false, 
+				bool save_sum_in = false
 				);
 
 		// Forward fill functions
@@ -41,10 +47,10 @@ class Profile
 		void dedisperse_incoherent (double DM, size_t nchann);
 		void dedisperse_coherent (double DM, size_t nchann);
 
-		void dedisperse_incoherent_stream (double DM, size_t nchann);
-		void dedisperse_coherent_stream (double DM, size_t nchann);
+		std::string dedisperse_incoherent_stream (double DM, size_t nchann);
+		std::string dedisperse_coherent_stream (double DM, size_t nchann);
 
-		void get_mask(size_t nchann);
+		void create_mask(size_t nchann, double sig_threshold, double tail_threshold);
 
 		void fold_dyn(double P, size_t nchann);
 		void fold_dyn(std::string pred_file, size_t nchann);

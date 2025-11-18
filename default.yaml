@@ -4,39 +4,46 @@ general:
   output_dir: "data"
   #parfile: "0329.par"
   site: "PO"
-  verbose: 2
-  buf_size: 3
+  verbose: 1
+  buf_size: 10
 
   t0: 4.8
-  t1: 60.0
+  t1: 10.0
+  
+  save_raw: true
+  save_dyn: true
+  save_sum: true
+
 
 
 options:
 
   # "dedisperce" options
-  ddtype: "coherent"
+  ddtype: "incoherent"
 
-  fold: false
-  t2pred: "t2pred.dat"
+  fold: true
+  #t2pred: "t2pred.dat"
 
-  nchann: 2097152
-  #nchann: 8192
-  mask: ""
-  filter: true          # this only available for incoherent dedispersion
-  tail_threshold: .7    # this only available for incoherent dedispersion
-  std_threshold: 3      # this only available for incoherent dedispersion
+  #nchann: 33554432
+  nchann: 512
+  mask: ""              # External file containing mask. Has higher priority than the filtration
+  filter: true  
+  tail_threshold: .7    
+  std_threshold: 3      
 
   
 # Owerwrite files' headers
 advanced:
+  #sampling: 1024.0
   #dm: 26.776
+  #fmin: 1772.0
+  #fmax: 1260.0
   #fmin: 2675.8
   #fmax: 2163.8
-  #sampling: 1024.0
   #dm: 56.7712
 
 files:
-#  - Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif 
+  # - Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif 
 #  - wideband_1024_2048.vdif
 #  - rup106_bd_321-1252_ch07.vdif
   - 010818_0329+54_00adc
