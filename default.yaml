@@ -11,8 +11,8 @@ general:
   t1: 10.0
   
   save_raw: true
-  save_dyn: true
-  save_sum: true
+  save_dyn: false
+  save_sum: false
 
 
 
@@ -21,7 +21,7 @@ options:
   # "dedisperce" options
   ddtype: "incoherent"
 
-  fold: true
+  fold: false
   #t2pred: "t2pred.dat"
 
   #nchann: 33554432

@@ -84,6 +84,16 @@ void Profile::dedisperse_incoherent(double DM, size_t nchann)
         throw std::runtime_error("Reader not initialized or file not open");
 	}
 
+	if (reader->header_ptr->nchann != nchann && reader->header_ptr->nchann != 1)
+        throw std::runtime_error("File was recorded with different number of freqs");
+
+	if (reader->header_ptr->nchann == 1)
+	{
+		reader->header_ptr->nchann = nchann;
+		reader->header_ptr-> tau = 
+			2.0e-3 * nchann / reader->header_ptr->sampling;
+	}
+
 	size_t obs_window;
 	double tau;
 
@@ -182,6 +192,17 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
         throw std::runtime_error("Reader not initialized or file not open");
 	}
 
+	if (reader->header_ptr->nchann != nchann && reader->header_ptr->nchann != 1)
+        throw std::runtime_error("File was recorded with different number of freqs");
+
+	if (reader->header_ptr->nchann == 1)
+	{
+		reader->header_ptr->nchann = nchann;
+		reader->header_ptr-> tau = 
+			2.0e-3 * nchann / reader->header_ptr->sampling;
+	}
+
+
 	size_t obs_window;
 	double tau;
 
@@ -226,10 +247,6 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 		reader->header_ptr->fcomp = fcomp;
 	}
 
-	if (reader->header_ptr-> nchann == 1)
-		reader->header_ptr-> tau = 
-			2.0e-3 * nchann / reader->header_ptr->sampling;
-
 	tau = reader->header_ptr->tau;
 
 	freqs = new double[nchann];
@@ -248,7 +265,6 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 	#pragma omp simd
 	for (size_t i = 0; i < nchann; ++i)
 		shift[i] = static_cast<int> (dt[i] / tau + 0.5);
-
 
 
 	double dtmax = 4.15e6 * DM * std::abs(1/fmin/fmin - 1/fmax/fmax);
@@ -343,7 +359,7 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 		// regecting first and last n_DM/2 inputs
 
 		if (save_raw)
-			dyn_output.write(reinterpret_cast<const char*>(pre),
+			raw_output.write(reinterpret_cast<const char*>(pre),
 					nchann * (buf_max - n_DM) * sizeof(double));
 
 		if (save_dyn)
@@ -378,21 +394,31 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 		}
 	}
 
+
 	for (size_t t = 0; t < obs_window - n_DM; ++t) 
 		sum[t] = std::accumulate(post + t*nchann, post + (t+1)*nchann, 0.0);
 
 
 	if (save_raw)
+	{
 		raw_output.write(reinterpret_cast<const char*>(pre),
 				nchann * (buf_max - n_DM) * sizeof(double));
+		raw_output.close();
+	}
 
 	if (save_dyn)
+	{
 		dyn_output.write(reinterpret_cast<const char*>(post),
 				nchann * (buf_max - n_DM) * sizeof(double));
+		dyn_output.close();
+	}
 
 	if (save_sum)
+	{
 		sum_output.write(reinterpret_cast<const char*>(sum),
 				(buf_max - n_DM) * sizeof(double));
+		sum_output.close();
+	}
 
 	std::cout << "last step" << std:: endl;
 

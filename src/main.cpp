@@ -162,8 +162,6 @@ int main()
 
 		PSRFITS_Writer writer(profile, output_dir + filename + ".psrfits");
 
-		if (save_raw || save_dyn || save_sum)
-			writer.createPrimaryHDU();
 
 		BaseHeader* hdr = profile.getHeader();
 		if (!hdr) 
@@ -227,6 +225,11 @@ int main()
 
 			if (config["options"]["fold"].as<bool>())
 			{
+
+				if (save_raw || save_dyn || save_sum)
+					writer.createPrimaryHDU("PSR");
+
+
 				std::string t2_pred_file = "";
 
 				if (config["options"] && config["options"]["t2pred"]) 
@@ -274,6 +277,9 @@ int main()
 			}
 			else
 			{
+				if (save_raw || save_dyn || save_sum)
+					writer.createPrimaryHDU("SEARCH");
+
 				std::string id = "";
 
 				if (config["options"]["ddtype"].as<std::string>() == "incoherent")
@@ -286,6 +292,15 @@ int main()
 				}
 				else
 					throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
+
+				if(save_raw)
+					writer.append_subint_stream("raw_"+id, hdr->nchann, 1);
+
+				if(save_dyn)
+					writer.append_subint_stream("dyn_"+id, hdr->nchann, 1);
+
+				if(save_sum)
+					writer.append_subint_stream("sum_"+id, 1, 1);
 			}
 
 
