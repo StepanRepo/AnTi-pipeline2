@@ -2,35 +2,32 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from myplot import *
-
-def bin_time(data, bin_size):
-    T, F = data.shape
-    n_bins = T // bin_size
-    trimmed = data[:n_bins * bin_size]
-    reshaped = trimmed.reshape(n_bins, bin_size, F)
-    
-    return reshaped.sum(axis=1)
-
-data = np.fromfile("./dyn_1804289383.bin", dtype = np.float64)
-data = data.reshape(-1, 512)
-data = bin_time(data, 16).T
-
-print(np.any(np.isnan(data)))
-print(np.mean(data))
-
-plt.figure()
-plt.imshow(np.log(data),
-           origin = "lower",
-           aspect = "auto",
-           interpolation = "none",
-           cmap = "Greys")
-
-plt.figure()
-plt.plot(np.sum(data, axis = 0))
-
-plt.figure()
-plt.plot(np.sum(data, axis = 1))
+from your.formats.psrfits import PsrfitsFile
 
 
-save_image("plot.pdf")
+with PsrfitsFile("./data/010818_0329+54_00adc.psrfits") as psrfits_file:
+        # Check observation mode
+        primary_hdr = hdul[0].header
+        subint_hdu = hdul['SUBINT']
+        header = subint_hdu.header
+
+        nsubint = header['NAXIS2']
+        nchan   = header['NCHAN']
+        nbin    = header['NBIN']
+        npol    = header['NPOL']
+
+        print(f"File contains {len(hdul)} subints, {nchan} channels, {nbin} bins, {npol} pols")
+
+        # Read data and metadata
+        data     = subint_hdu.data['DATA']           # Shape: (nsubint, nbin, nchan, npol)
+        dat_freq = subint_hdu.data['DAT_FREQ']       # Shape: (nsubint, nchan)
+        dat_wts  = subint_hdu.data['DAT_WTS']        # Shape: (nsubint, nchan)
+        dat_scl  = subint_hdu.data['DAT_SCL']        # Shape: (nsubint, nchan*npol)
+        dat_offs = subint_hdu.data['DAT_OFFS']       # Shape: (nsubint, nchan*npol)
+        tsubint  = subint_hdu.data['TSUBINT']        # Duration of each subint
+        tau      = subint_hdu.header['TBIN']
+
+        for i in range(10):
+            print(data[0, i], bin(data[0, i]))
+
+

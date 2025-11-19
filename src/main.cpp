@@ -267,7 +267,8 @@ int main()
 
 				// save the results in fold mode
 				if(save_raw)
-					writer.append_subint_fold(profile.raw, hdr->obs_window, hdr->nchann, 1);
+					//writer.append_subint_fold(profile.raw, hdr->obs_window, hdr->nchann, 1);
+					writer.append_subint_search(profile.raw, hdr->obs_window, hdr->nchann, 1);
 
 				if(save_dyn)
 					writer.append_subint_fold(profile.dyn, hdr->obs_window, hdr->nchann, 1);

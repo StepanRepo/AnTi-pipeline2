@@ -7,8 +7,8 @@ general:
   verbose: 1
   buf_size: 10
 
-  t0: 4.8
-  t1: 10.0
+  t0: 5.0
+  t1: 7.0
   
   save_raw: true
   save_dyn: false
@@ -21,7 +21,7 @@ options:
   # "dedisperce" options
   ddtype: "incoherent"
 
-  fold: false
+  fold: true
   #t2pred: "t2pred.dat"
 
   #nchann: 33554432

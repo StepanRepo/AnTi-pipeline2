@@ -40,6 +40,7 @@ class PSRFITS_Writer
 		bool createPrimaryHDU(std::string obs_mode);
 		bool append_subint_fold(double *data_double, const size_t nbin, const size_t nchan, const size_t npol) ;
 		bool append_subint_stream(std::string stream_file, const size_t nchan, const size_t npol, bool cmp = false);
+		bool append_subint_search(double *data_double, const size_t nbin, const size_t nchan, const size_t npol, bool cmp = false);
 
 	private:
 		fitsfile* fptr; // CFITSIO file pointer
