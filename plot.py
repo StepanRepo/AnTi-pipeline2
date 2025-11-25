@@ -9,8 +9,6 @@ from tqdm import tqdm
 import astropy.units as u
 from astropy.time import Time
 from astropy.io import fits
-
-import pdat
 from scipy.stats import sigmaclip
 
 def bin_time(data, bin_size):
@@ -28,12 +26,12 @@ def read_psr(hdul):
     Also returns frequency array (MHz) and time array (s).
     """
     # Check observation mode
-    primary_hdr = hdul[0].read_header()
+    primary_hdr = hdul[0].header
     if primary_hdr.get('OBS_MODE', '').strip() != 'PSR':
         raise ValueError("File is not in fold-mode (OBS_MODE != 'PSR')")
 
     subint_hdu = hdul['SUBINT']
-    header = subint_hdu.read_header()
+    header = subint_hdu.header
 
     nsubint = header['NAXIS2']
     nchan   = header['NCHAN']
@@ -43,7 +41,7 @@ def read_psr(hdul):
     print(f"File contains {nsubint} subints, {nchan} channels, {nbin} bins, {npol} pols")
 
     # Read data and metadata
-    si_data = subint_hdu.read()
+    si_data = subint_hdu.data
     data     = si_data['DATA']           # Shape: (nsubint, nbin, nchan, npol)
     dat_freq = si_data['DAT_FREQ']       # Shape: (nsubint, nchan)
     dat_wts  = si_data['DAT_WTS']        # Shape: (nsubint, nchan)
@@ -53,13 +51,10 @@ def read_psr(hdul):
     tau      = header['TBIN']
 
 
-    # Cast DATA to float and apply scale/offset
-    # PSRFITS stores data in (bin, chan, pol) order
     real_data = data.astype(np.float64) 
-    #real_data = np.transpose(real_data, (0, 1, 3, 2))   
-    s = real_data.shape
-    real_data = real_data.reshape(s[0], s[1], s[3], s[2])   
-    real_data = real_data * dat_scl[:, np.newaxis, np.newaxis, :] + dat_offs[:, np.newaxis, np.newaxis, :]
+    real_data = real_data * dat_scl[np.newaxis, :, :, np.newaxis] + dat_offs[np.newaxis, :, :, np.newaxis]
+
+    real_data = np.transpose(real_data, (0, 1, 3, 2))
 
     # Collapse polarization (if needed) — assume Stokes I = sum of pols
     if npol > 1:
@@ -86,12 +81,12 @@ def read_search(hdul):
     Also returns frequency array (MHz) and time array (s).
     """
     # Check observation mode
-    primary_hdr = hdul[0].read_header()
+    primary_hdr = hdul[0].header
     if primary_hdr.get('OBS_MODE', '').strip() != 'SEARCH':
         raise ValueError("File is not in search-mode (OBS_MODE != 'SEARCH')")
 
     subint_hdu = hdul['SUBINT']
-    header = subint_hdu.read_header()
+    header = subint_hdu.header
 
     nsubint = header['NAXIS2']
     nchan   = header['NCHAN']
@@ -104,7 +99,7 @@ def read_search(hdul):
     print(f"File contains {nsubint} subints, {nchan} channels, {nbin} bins, {npol} pols")
 
     # Read data and metadata
-    si_data = subint_hdu.read()
+    si_data = subint_hdu.data
     data     = si_data['DATA']           # Shape: (nsubint, nbin, nchan, npol)
     dat_freq = si_data['DAT_FREQ']       # Shape: (nsubint, nchan)
     dat_wts  = si_data['DAT_WTS']        # Shape: (nsubint, nchan)
@@ -119,6 +114,7 @@ def read_search(hdul):
     # PSRFITS stores data in (bin, chan, pol) order
 
     real_data = data.astype(np.float64) 
+    print(real_data.shape)
     real_data = real_data * dat_scl[:, np.newaxis, np.newaxis, :] + dat_offs[:, np.newaxis, np.newaxis, :]
 
     #plt.figure()
@@ -148,8 +144,10 @@ def read_search(hdul):
 
 
 def read(filename):
-    with pdat.psrfits(filename, "r") as hdul:
-        mode = hdul[0].read_header().get('OBS_MODE', '').strip()
+    with fits.open(filename, memmap = True) as hdul:
+
+        mode = hdul[0].header.get('OBS_MODE', '').strip()
+        print(f"Observational mode: {mode}")
 
         match mode:
             case "PSR":
@@ -171,7 +169,8 @@ if __name__ == "__main__":
         binning = 1
 
         data_2d, freqs, tl = read(filename)
-        data_2d = bin_time(data_2d, binning).T
+        data_2d = data_2d.T
+        data_2d = bin_time(data_2d, binning)
 
         tl = tl * u.s
         freqs = freqs * u.MHz

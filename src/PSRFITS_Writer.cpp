@@ -37,6 +37,15 @@ std::string mjd2utc(long double mjd)
     return std::string(buffer);
 }	
 
+char* convert_str(std::string str, size_t len)
+{
+	static char result[256];
+	std::copy(str.begin(), str.end(), result);
+	std::fill(result + str.length(), result + len, ' ');
+
+	return result;
+}
+
 
 
 /*-----------------------
@@ -159,6 +168,11 @@ PSRFITS_Writer::~PSRFITS_Writer()
 bool PSRFITS_Writer::createPrimaryHDU(std::string obs_mode) 
 {
     // Basic FITS preamble
+    fits_write_key(fptr, TSTRING, "COMMENT", (void*)"FITS (Flexible Image Transport System) format defined in Astronomy and", nullptr, &status);
+    fits_write_key(fptr, TSTRING, "COMMENT", (void*)"Astrophysics Supplement Series v44/p363, v44/p371, v73/p359, v73/p365.", nullptr, &status);
+    fits_write_key(fptr, TSTRING, "COMMENT", (void*)"Contact the NASA Science Office of Standards and Technology for the", nullptr, &status);
+    fits_write_key(fptr, TSTRING, "COMMENT", (void*)"FITS Definition document #100 and other FITS information.", nullptr, &status);
+    // Basic PSRFITS preamble
     fits_write_key(fptr, TSTRING, "HDRVER", (void*)"6.1", "Header version", &status);
     fits_write_key(fptr, TSTRING, "FITSTYPE", (void*)"PSRFITS", "FITS definition for pulsar data files", &status);
 
@@ -170,6 +184,21 @@ bool PSRFITS_Writer::createPrimaryHDU(std::string obs_mode)
     fits_write_key(fptr, TSTRING, "OBSERVER", (void*)"", "Observer name(s)", &status);
     fits_write_key(fptr, TSTRING, "PROJID", (void*)"", "Project name", &status);
     fits_write_key(fptr, TSTRING, "TELESCOP", (void*)"", "Telescope name", &status);
+    fits_write_key(fptr, TFLOAT,  "ANT_X", new float(0.0), "[m] Antenna ITRF X-coordinate (D)", &status);
+    fits_write_key(fptr, TFLOAT,  "ANT_Y", new float(0.0), "[m] Antenna ITRF Y-coordinate (D)", &status);
+    fits_write_key(fptr, TFLOAT,  "ANT_Z", new float(0.0), "[m] Antenna ITRF Z-coordinate (D)", &status);
+    fits_write_key(fptr, TSTRING, "FRONTEND", (void*)"", "Receiver ID", &status);
+    fits_write_key(fptr, TINT,    "NRCVR", new int(1), "Number of receiver polarisation channels", &status);
+    fits_write_key(fptr, TSTRING, "FD_POLN", (void*)"", "LIN or CIRC", &status);
+    fits_write_key(fptr, TSTRING, "BACKEND", (void*)"", "Backend ID", &status);
+    fits_write_key(fptr, TFLOAT,  "EQUINOX", new float(2000.0), "Equinox of coords (e.g. 2000.0)", &status);
+    fits_write_key(fptr, TSTRING, "RA", (void*)"00:00:00.0", "Right ascension (hh:mm:ss.ssss)", &status);
+    fits_write_key(fptr, TSTRING, "DEC", (void*)"00:00:00.0", "Declination (-dd:mm:ss.sss)", &status);
+    fits_write_key(fptr, TFLOAT,  "BMAJ", new float(0.0), "[deg] Beam major axis length", &status);
+    fits_write_key(fptr, TFLOAT,  "BMIN", new float(0.0), "[deg] Beam minor axis length", &status);
+    fits_write_key(fptr, TFLOAT,  "BPA", new float(0.0), "[deg] Beam position angle", &status);
+    fits_write_key(fptr, TSTRING, "TRK_MODE", (void*)"", "Track mode (TRACK, SCANGC, SCANLAT)", &status);
+
 
     // Source info
     fits_write_key(fptr, TSTRING, "SRC_NAME", (void*)header->name.c_str(), "", &status);
@@ -182,13 +211,13 @@ bool PSRFITS_Writer::createPrimaryHDU(std::string obs_mode)
     // Time info (from BaseHeader)
 
     // Frequency info
-    double obsfreq = (header->fmin + header->fmax) / 2.0; // Simple center freq
+    double obsfreq = header->fmax; 
     double obsbw = std::abs(header->fmax - header->fmin);
     fits_write_key(fptr, TDOUBLE, "OBSFREQ", &obsfreq, "[MHz] Centre frequency for observation", &status);
     fits_write_key(fptr, TDOUBLE, "OBSBW", &obsbw, "[MHz] Bandwidth for observation", &status);
-    fits_write_key(fptr, TINT, "OBSNCHAN", &(header->nchann), "Number of frequency channels", &status);
+    fits_write_key(fptr, TINT,    "OBSNCHAN", &(header->nchann), "Number of frequency channels", &status);
     fits_write_key(fptr, TDOUBLE, "CHAN_DM", new double(0.0), "[cm-3 pc] DM used for on-line dedispersion", &status);
-    fits_write_key(fptr, TINT, "STT_IMJD", new int(header->t0), "[days] Start MJD (UTC)", &status);
+    fits_write_key(fptr, TINT,    "STT_IMJD", new int(header->t0), "[days] Start MJD (UTC)", &status);
     fits_write_key(fptr, TDOUBLE, "STT_SMJD", new double(fmod(header->t0, 1.0)*86400.0), "[s] Start time (sec past UTC 00h)", &status);
     fits_write_key(fptr, TDOUBLE, "STT_OFFS", new double(0.0), "[s] Start time offset", &status);
 
@@ -196,6 +225,158 @@ bool PSRFITS_Writer::createPrimaryHDU(std::string obs_mode)
 
 
     return true;
+}
+
+bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, const size_t nchan, const size_t nbin, double dm, std::string dds_mtd, bool wheighted)
+{
+    if (!fptr) 
+	{
+        std::cerr << "FITS file not initialized." << std::endl;
+        return false;
+    }
+
+	const char* ttype[] = {
+		"DATE_PRO",
+		"PROC_CMD",
+		"SCALE",
+		"POL_TYPE",
+		"NSUB", 
+		"NPOL", 
+		"NBIN",
+		"TBIN", 
+		"CTR_FREQ", 
+		"NCHAN", 
+		"CHAN_BW", 
+		"DM", 
+		"RM", 
+		"RM_CORR", 
+		"DEDISP", 
+		"DDS_MTHD", 
+		"SC_MTHD", 
+		"CAL_MTHD", 
+		"CAL_FILE", 
+		"RFI_MTHD", 
+		"RM_MODEL", 
+		"AUX_RM_C", 
+		"DM_MODEL", 
+		"AUX_DM_C",
+		"NBIN_PRD",
+		"REF_FREQ",
+		"PR_CORR",
+		"FD_CORR",
+		"BE_CORR",
+	};
+
+	const char* tform[] = {
+		"24A",  // DATE_PRO     1
+		"256A", // PROC_CMD     2
+		"8A",   // SCALE        3
+		"8A",   // POL_TYPE     4
+		"1J",   // NSUB         5
+		"1I",   // NPOL         6
+		"1I",   // NBIN         7
+		"1D",   // TBIN         8
+		"1D",   // CTR_FREQ     9
+		"1J",   // NCHAN       10
+		"1D",   // CHAN_BW     11
+		"1D",   // DM          12
+		"1D",   // RM          13
+		"1I",   // RM_CORR     14
+		"1I",   // DEDISP      15
+		"32A",  // DDS_MTHD    16
+		"32A",  // SC_MTHD     17
+		"32A",  // CAL_MTHD    18
+		"256A", // CAL_FILE    19
+		"32A",  // RFI_MTHD    20
+		"32A",  // RM_MODEL    21
+		"1I",   // AUX_RM_C    22
+		"32A",  // DM_MODEL    23
+		"1I",   // AUX_DM_C     24
+		"1I",
+		"1D",
+		"1I",
+		"1I",
+		"1I"
+	};
+	const char *tunit[] = {"", "", "", "", "", "", "", "s", "MHz", "", "MHz", "CM-3 PC", "RAD M-2", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
+
+    fits_create_tbl(fptr, BINARY_TBL, 1, 29,
+                    const_cast<char**>(ttype), // names
+                    const_cast<char**>(tform), // sizes and dtypes
+                    const_cast<char**>(tunit), // units
+                    "HISTORY", &status);
+
+	check_status("Creating HISTORY binary table");
+
+	double ctr_freq = 0.0;
+	double bw = header->fmax - header->fmin;
+	double chan_bw = bw / double(nchan);
+
+	std::string rfi_mtd = "";
+
+    if (profile->mask && wheighted) 
+	{
+        for (size_t i = 0; i < nchan; ++i) 
+            ctr_freq = profile->mask[i] * (header->fmin + (double(i)+.5)*chan_bw);
+
+		ctr_freq = ctr_freq / double(nchan);
+
+		rfi_mtd = "sigmaclip";
+    } 
+	else 
+	{
+		ctr_freq = (header->fmin + header->fmax) / 2.0;
+    }
+
+	bw = std::abs(bw);
+	chan_bw = std::abs(chan_bw);
+
+	int dedisp = 1;
+
+	if (dds_mtd == "none")
+		dedisp = 0;
+	else if (dds_mtd == "coherent" || dds_mtd == "incoherent")
+		dedisp = 1;
+	else 
+		std::cout << "Unknown type of dedispersion. Setting flag to dedispersed" << std::endl;
+
+
+
+	fits_write_col(fptr, TBYTE,     1, 1, 1, 24, convert_str(getCurrentUTCTime(), 24), &status);
+	fits_write_col(fptr, TBYTE,     2, 1, 1, 256, convert_str("This file was created with AnTi-pipeline2", 256), &status);
+	fits_write_col(fptr, TBYTE,     3, 1, 1, 8, convert_str("FluxDen", 8), &status);
+	fits_write_col(fptr, TBYTE,     4, 1, 1, 8, convert_str("NONE", 8), &status);
+	fits_write_col(fptr, TLONG,     5, 1, 1, 1, new long(nsubint), &status);
+	fits_write_col(fptr, TINT,      6, 1, 1, 1, (void*)&npol, &status);
+	fits_write_col(fptr, TINT,      7, 1, 1, 1, (void*)&nbin, &status);
+	fits_write_col(fptr, TDOUBLE,   8, 1, 1, 1, new double((header->tau)*1e-3), &status);
+	fits_write_col(fptr, TDOUBLE,   9, 1, 1, 1, (void*)&ctr_freq, &status);
+	fits_write_col(fptr, TLONG,    10, 1, 1, 1, (void*)&nchan, &status);
+	fits_write_col(fptr, TDOUBLE,  11, 1, 1, 1, (void*)&chan_bw, &status);
+	fits_write_col(fptr, TDOUBLE,  12, 1, 1, 1, (void*)&dm, &status);
+	fits_write_col(fptr, TDOUBLE,  13, 1, 1, 1, new double(0.0), &status);
+	fits_write_col(fptr, TINT,     14, 1, 1, 1, new int(0), &status);
+	fits_write_col(fptr, TINT,     15, 1, 1, 1, (void*)&dedisp, &status);
+	fits_write_col(fptr, TBYTE,    16, 1, 1, 32, convert_str(dds_mtd, 32), &status);
+	fits_write_col(fptr, TBYTE,    17, 1, 1, 32, convert_str("NONE", 32), &status);
+	fits_write_col(fptr, TBYTE,    18, 1, 1, 32, convert_str("NONE", 32), &status);
+	fits_write_col(fptr, TBYTE,    19, 1, 1, 256, convert_str("NONE", 256), &status);
+	fits_write_col(fptr, TBYTE,    20, 1, 1, 32, convert_str(rfi_mtd, 32), &status);
+	fits_write_col(fptr, TBYTE,    21, 1, 1, 32, convert_str("NONE", 32), &status);
+	fits_write_col(fptr, TINT,     22, 1, 1, 1, new int(0), &status);
+	fits_write_col(fptr, TBYTE,    23, 1, 1, 32, convert_str("NONE", 32), &status);
+	fits_write_col(fptr, TINT,     24, 1, 1, 1, new int(0), &status);
+	fits_write_col(fptr, TINT,     25, 1, 1, 1, new int(1), &status);
+	fits_write_col(fptr, TDOUBLE,  26, 1, 1, 1, &(header->fcomp), &status);
+	fits_write_col(fptr, TINT,     27, 1, 1, 1, new int(0), &status);
+	fits_write_col(fptr, TINT,     28, 1, 1, 1, new int(0), &status);
+	fits_write_col(fptr, TINT,     29, 1, 1, 1, new int(0), &status);
+
+    fits_write_key(fptr, TINT, "EXTVER", new int(1), "auto assigned by template parser ", &status);
+
+	check_status("Writing history");
+
+	return true;
 }
 
 
@@ -216,12 +397,12 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
 	snprintf(scl_form,  sizeof(scl_form),  "%dE", int(nchan * npol));
 	snprintf(data_form, sizeof(data_form), "%dI", int(nbin * nchan * npol));
 
-	const char* ttype[] = { "TSUBINT", "OFFS_SUB", "DAT_FREQ", "DAT_WTS", "DAT_OFFS", "DAT_SCL", "DATA" };
-	const char* tform[] = { "1D", "1D", freq_form, wts_form, offs_form, scl_form, data_form };
-	const char* tunit[] = { "s", "s", "MHz", "", "", "", ""};
+	const char* ttype[] = { "TSUBINT", "OFFS_SUB", "DAT_FREQ", "DAT_WTS", "DAT_OFFS", "DAT_SCL", "PERIOD", "DATA" };
+	const char* tform[] = { "1D", "1D", freq_form, wts_form, offs_form, scl_form, "1D", data_form };
+	const char* tunit[] = { "s", "s", "MHz", "", "", "", "s", ""};
 
 	// Create the binary table
-    fits_create_tbl(fptr, BINARY_TBL, 1, 7,
+    fits_create_tbl(fptr, BINARY_TBL, 1, 8,
                     const_cast<char**>(ttype), // names
                     const_cast<char**>(tform), //sizes and dtypes
                     const_cast<char**>(tunit), // units
@@ -229,24 +410,27 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
 
 	int naxis = 3;
 	long naxes[3] = {long(nbin), long(nchan), long(npol)};
-	fits_write_tdim(fptr, 7, naxis, naxes, &status);
+	fits_write_tdim(fptr, 8, naxis, naxes, &status);
 	
+	double dB = std::abs(header->fmax - header->fmin) / double(nchan);
 
 	// Additional keys
     fits_write_key(fptr, TSTRING, "EPOCHS", (void*) "STT_MJD", "Epoch convention (VALID, MIDTIME, STT_MJD)", &status);
     fits_write_key(fptr, TSTRING, "INT_TYPE", (void*) "TIME", "Time axis (TIME, BINPHSPERI, BINLNGASC, etc)", &status);
     fits_write_key(fptr, TSTRING, "INT_UNIT", (void*) "SEC", "Unit of time axis (SEC, PHS (0-1), DEG)", &status);
-    fits_write_key(fptr, TSTRING, "SCALE", (void*) "Counts", "Intensity units (FluxDen/RefFlux/Jansky)", &status);
-    fits_write_key(fptr, TSTRING, "POL_TYPE", (void*) "", "Polarisation identifier (e.g., AABBCRCI, AA+BB)", &status);
-    fits_write_key(fptr, TINT, "NPOL", new int (1), "Number of polarisations", &status); // Assuming 1 pol
+    fits_write_key(fptr, TSTRING, "SCALE", (void*) "FluxDen", "Intensity units (FluxDen/RefFlux/Jansky)", &status);
+    fits_write_key(fptr, TSTRING, "POL_TYPE", (void*) "NONE", "Polarisation identifier (e.g., AABBCRCI, AA+BB)", &status);
+    fits_write_key(fptr, TINT,    "NPOL", new int (1), "Number of polarisations", &status); // Assuming 1 pol
     fits_write_key(fptr, TDOUBLE, "TBIN", new double(header->tau*1.0e-3), "[s] Time per bin/sample", &status);
-    fits_write_key(fptr, TINT, "NBIN", (void*) &nbin, "Nr of bins (PSR/CAL mode; else 1)", &status); 
+    fits_write_key(fptr, TINT,    "NBIN", (void*) &nbin, "Nr of bins (PSR/CAL mode; else 1)", &status); 
     fits_write_key(fptr, TDOUBLE, "PHS_OFFS", new double(0.0), "Phase offset of bin 0 for gated data", &status); 
-    fits_write_key(fptr, TINT, "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
-	double dB = std::abs(header->fmax - header->fmin) / double(nchan);
+    fits_write_key(fptr, TINT,    "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
     fits_write_key(fptr, TDOUBLE, "CHAN_BW", &dB, "[MHz] Channel/sub-band width", &status);
     fits_write_key(fptr, TDOUBLE, "DM", &(header->dm), "[cm-3 pc] DM used for dedispersion", &status);
     fits_write_key(fptr, TDOUBLE, "RM", new double(0.0), "[rad m-2] RM for post-detection deFaraday", &status);
+    fits_write_key(fptr, TINT,    "NCHNOFFS", new int(0), "Channel/sub-band offset for split files", &status);
+
+    fits_write_key(fptr, TINT, "EXTVER", new int(1), "auto assigned by template parser ", &status);
 
 	check_status("Creating SUBINT (dynamic profile) bin table");
 
@@ -265,6 +449,10 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
 			data_int.data(), 16,
 			dat_scl.data(), dat_offs.data());
 
+
+	// transform array's flat C layout to FITS FORTRAN-style layout
+	const std::vector<size_t> dims = {nbin, nchan};
+	math::layout_c_to_f((int16_t*) data_int.data(), dims);
 
     // --- 3. Prepare frequency array (linear spacing)
     std::vector<double> dat_freq(nchan);
@@ -307,8 +495,10 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
     fits_write_col(fptr, TFLOAT, 5, row, 1, nchan * npol, dat_offs.data(), &status);
     fits_write_col(fptr, TFLOAT, 6, row, 1, nchan * npol, dat_scl.data(), &status);
 
+    fits_write_col(fptr, TDOUBLE, 7, row, 1, 1, new double(header->period), &status);
+
     // DATA (int16)
-    fits_write_col(fptr, TSHORT, 7, row, 1, nbin * nchan * npol, data_int.data(), &status);
+    fits_write_col(fptr, TSHORT, 8, row, 1, nbin * nchan * npol, data_int.data(), &status);
 
 	check_status("Writing SUBINT bintable (dynamic spectrum)");
 
@@ -323,6 +513,8 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t 
         std::cerr << "FITS file not initialized." << std::endl;
         return false;
     }
+
+
 
 	int nsblk = 4096;
 	int nbits = 8;
@@ -339,6 +531,9 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t 
 	long nsubint = nstot / (nsblk*nbits/8);
 	if ((nstot/nchan/npol) % (nsblk*nbits/8) != 0)
 		nsubint += 1;
+
+	append_history(nsubint, npol, nchan, 1, header->dm, "none");
+
 
     // Fixed parameters for search-mode
 
@@ -367,25 +562,31 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t 
 	
 
 	// Additional keys
+    fits_write_key(fptr, TINT, "NSUBINT", new int(nsubint), "Number of Sub-Integrations", &status); 
     fits_write_key(fptr, TSTRING, "EPOCHS", (void*) "STT_MJD", "Epoch convention (VALID, MIDTIME, STT_MJD)", &status);
     fits_write_key(fptr, TSTRING, "INT_TYPE", (void*) "TIME", "Time axis (TIME, BINPHSPERI, BINLNGASC, etc)", &status);
     fits_write_key(fptr, TSTRING, "INT_UNIT", (void*) "SEC", "Unit of time axis (SEC, PHS (0-1), DEG)", &status);
-    fits_write_key(fptr, TSTRING, "SCALE", (void*) "Counts", "Intensity units (FluxDen/RefFlux/Jansky)", &status);
-    fits_write_key(fptr, TSTRING, "POL_TYPE", (void*) "", "Polarisation identifier (e.g., AABBCRCI, AA+BB)", &status);
-    fits_write_key(fptr, TINT, "NPOL", new int (1), "Number of polarisations", &status); // Assuming 1 pol
+    fits_write_key(fptr, TSTRING, "SCALE", (void*) "FluxDen", "Intensity units (FluxDen/RefFlux/Jansky)", &status);
+    fits_write_key(fptr, TSTRING, "POL_TYPE", (void*) "NONE", "Polarisation identifier (e.g., AABBCRCI, AA+BB)", &status);
+    fits_write_key(fptr, TINT, "NPOL", (void*)&npol, "Number of polarisations", &status); // Assuming 1 pol
     fits_write_key(fptr, TDOUBLE, "TBIN", new double(header->tau*1.0e-3), "[s] Time per bin/sample", &status);
     fits_write_key(fptr, TINT, "NBIN", new int(1), "Nr of bins (PSR/CAL mode; else 1)", &status); 
     fits_write_key(fptr, TDOUBLE, "PHS_OFFS", new double(0.0), "Phase offset of bin 0 for gated data", &status); 
     fits_write_key(fptr, TINT, "NBITS", &nbits, "Nr of bits/datum (SEARCH mode data, else 1)", &status); 
     fits_write_key(fptr, TDOUBLE, "ZERO_OFF", new double(0.0), "Zero offset for SEARCH-mode data", &status);
     fits_write_key(fptr, TINT, "SIGNINT", new int(1), "1 for signed ints in SEARCH-mode data, else 0", &status); 
+    fits_write_key(fptr, TINT, "NSUBOFFS", new int(0), "Subint offset (Contiguous SEARCH-mode files)", &status); 
     fits_write_key(fptr, TINT, "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
+    fits_write_key(fptr, TINT, "NCH_STRT", new int(0), "Channel/sub-band offset for split files", &status);
 	double dB = std::abs(header->fmax - header->fmin) / double(nchan);
     fits_write_key(fptr, TDOUBLE, "CHAN_BW", &dB, "[MHz] Channel/sub-band width", &status);
     fits_write_key(fptr, TDOUBLE, "DM", &(header->dm), "[cm-3 pc] DM used for dedispersion", &status);
     fits_write_key(fptr, TDOUBLE, "RM", new double(0.0), "[rad m-2] RM for post-detection deFaraday", &status);
+    fits_write_key(fptr, TINT, "NCHNOFFS", new int(0), "Channel/sub-band offset for split files", &status);
     fits_write_key(fptr, TINT, "NSBLK", &nsblk, "Samples/row (SEARCH mode, else 1)", &status); 
     fits_write_key(fptr, TINT, "NSTOT", &nstot, "Total number of samples (SEARCH mode, else 1)", &status); 
+
+    fits_write_key(fptr, TINT, "EXTVER", new int(1), "auto assigned by template parser ", &status);
 
 
     // Prepare frequency array (linear spacing)
@@ -420,7 +621,7 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t 
 	size_t actually_read = 0;
 
 
-	for (int row = 1; row < nsubint+1; ++row)
+	for (int row = 1; row <= nsubint; ++row)
 	{
 		stream.read(reinterpret_cast<char*>(data_double), sizeof(double)*nsblk*nchan*npol);
 
@@ -466,6 +667,7 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t 
 
 	return true;
 }
+
 
 bool PSRFITS_Writer::append_subint_search(double* data_double, const size_t nbin, const size_t nchan, const size_t npol, bool cmp)
 {
@@ -515,8 +717,8 @@ bool PSRFITS_Writer::append_subint_search(double* data_double, const size_t nbin
     fits_write_key(fptr, TSTRING, "EPOCHS", (void*) "STT_MJD", "Epoch convention (VALID, MIDTIME, STT_MJD)", &status);
     fits_write_key(fptr, TSTRING, "INT_TYPE", (void*) "TIME", "Time axis (TIME, BINPHSPERI, BINLNGASC, etc)", &status);
     fits_write_key(fptr, TSTRING, "INT_UNIT", (void*) "SEC", "Unit of time axis (SEC, PHS (0-1), DEG)", &status);
-    fits_write_key(fptr, TSTRING, "SCALE", (void*) "Counts", "Intensity units (FluxDen/RefFlux/Jansky)", &status);
-    fits_write_key(fptr, TSTRING, "POL_TYPE", (void*) "", "Polarisation identifier (e.g., AABBCRCI, AA+BB)", &status);
+    fits_write_key(fptr, TSTRING, "SCALE", (void*) "FluxDen", "Intensity units (FluxDen/RefFlux/Jansky)", &status);
+    fits_write_key(fptr, TSTRING, "POL_TYPE", (void*) "NONE", "Polarisation identifier (e.g., AABBCRCI, AA+BB)", &status);
     fits_write_key(fptr, TINT, "NPOL", new int (1), "Number of polarisations", &status); // Assuming 1 pol
     fits_write_key(fptr, TDOUBLE, "TBIN", new double(header->tau*1.0e-3), "[s] Time per bin/sample", &status);
     fits_write_key(fptr, TINT, "NBIN", new int(1), "Nr of bins (PSR/CAL mode; else 1)", &status); 
@@ -524,13 +726,17 @@ bool PSRFITS_Writer::append_subint_search(double* data_double, const size_t nbin
     fits_write_key(fptr, TINT, "NBITS", &nbits, "Nr of bits/datum (SEARCH mode data, else 1)", &status); 
     fits_write_key(fptr, TDOUBLE, "ZERO_OFF", new double(0.0), "Zero offset for SEARCH-mode data", &status);
     fits_write_key(fptr, TINT, "SIGNINT", new int(1), "1 for signed ints in SEARCH-mode data, else 0", &status); 
+    fits_write_key(fptr, TINT, "NSUBOFFS", new int(0), "Subint offset (Contiguous SEARCH-mode files)", &status); 
     fits_write_key(fptr, TINT, "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
 	double dB = std::abs(header->fmax - header->fmin) / double(nchan);
     fits_write_key(fptr, TDOUBLE, "CHAN_BW", &dB, "[MHz] Channel/sub-band width", &status);
     fits_write_key(fptr, TDOUBLE, "DM", &(header->dm), "[cm-3 pc] DM used for dedispersion", &status);
     fits_write_key(fptr, TDOUBLE, "RM", new double(0.0), "[rad m-2] RM for post-detection deFaraday", &status);
+    fits_write_key(fptr, TINT, "NCHNOFFS", new int(0), "Channel/sub-band offset for split files", &status);
     fits_write_key(fptr, TINT, "NSBLK", &nsblk, "Samples/row (SEARCH mode, else 1)", &status); 
     fits_write_key(fptr, TINT, "NSTOT", &nstot, "Total number of samples (SEARCH mode, else 1)", &status); 
+
+    fits_write_key(fptr, TINT, "EXTVER", new int(1), "auto assigned by template parser ", &status);
 
 
     // Prepare frequency array (linear spacing)

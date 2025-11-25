@@ -2,32 +2,29 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from your.formats.psrfits import PsrfitsFile
+from myplot import *
+import psrchive
 
 
-with PsrfitsFile("./data/010818_0329+54_00adc.psrfits") as psrfits_file:
-        # Check observation mode
-        primary_hdr = hdul[0].header
-        subint_hdu = hdul['SUBINT']
-        header = subint_hdu.header
+arch = psrchive.Archive.load("data/010818_0329+54_00adc.psrfits")
+data = arch.get_data()
 
-        nsubint = header['NAXIS2']
-        nchan   = header['NCHAN']
-        nbin    = header['NBIN']
-        npol    = header['NPOL']
+s = data.shape
+#data = data.reshape(*s[::-1]).T
 
-        print(f"File contains {len(hdul)} subints, {nchan} channels, {nbin} bins, {npol} pols")
-
-        # Read data and metadata
-        data     = subint_hdu.data['DATA']           # Shape: (nsubint, nbin, nchan, npol)
-        dat_freq = subint_hdu.data['DAT_FREQ']       # Shape: (nsubint, nchan)
-        dat_wts  = subint_hdu.data['DAT_WTS']        # Shape: (nsubint, nchan)
-        dat_scl  = subint_hdu.data['DAT_SCL']        # Shape: (nsubint, nchan*npol)
-        dat_offs = subint_hdu.data['DAT_OFFS']       # Shape: (nsubint, nchan*npol)
-        tsubint  = subint_hdu.data['TSUBINT']        # Duration of each subint
-        tau      = subint_hdu.header['TBIN']
-
-        for i in range(10):
-            print(data[0, i], bin(data[0, i]))
+print(data.shape)
 
 
+
+plt.figure()
+plt.imshow(data[0, 0],
+           cmap = "Greys",
+           origin = "lower",
+           aspect = "auto",
+           interpolation = "none")
+plt.figure()
+plt.plot(np.sum(data[0, 0], axis = 0))
+plt.figure()
+plt.plot(np.sum(data[0, 0], axis = 1))
+
+save_image("plot.pdf")

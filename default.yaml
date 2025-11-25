@@ -5,7 +5,7 @@ general:
   #parfile: "0329.par"
   site: "PO"
   verbose: 1
-  buf_size: 10
+  buf_size: 2
 
   t0: 5.0
   t1: 7.0
@@ -21,7 +21,7 @@ options:
   # "dedisperce" options
   ddtype: "incoherent"
 
-  fold: true
+  fold: false
   #t2pred: "t2pred.dat"
 
   #nchann: 33554432
