@@ -50,9 +50,14 @@ def read_psr(hdul):
     tsubint  = si_data['TSUBINT']        # Duration of each subint
     tau      = header['TBIN']
 
+    if (nchan == 1):
+        dat_scl = dat_scl[:, np.newaxis]
+        dat_offs = dat_offs[:, np.newaxis]
+        dat_wts = dat_wts[:, np.newaxis]
+
 
     real_data = data.astype(np.float64) 
-    real_data = real_data * dat_scl[np.newaxis, :, :, np.newaxis] + dat_offs[np.newaxis, :, :, np.newaxis]
+    real_data = (real_data * dat_scl[np.newaxis, :, :, np.newaxis] + dat_offs[np.newaxis, :, :, np.newaxis]) * dat_wts[np.newaxis, :, :, np.newaxis]
 
     real_data = np.transpose(real_data, (0, 1, 3, 2))
 
@@ -110,19 +115,23 @@ def read_search(hdul):
     if (signint == 1 and header['NBITS'] == 8):
         data = data.astype(np.int8)
 
+
+
+    if (nchan == 1):
+        dat_scl = dat_scl[:, np.newaxis]
+        dat_offs = dat_offs[:, np.newaxis]
+        dat_wts = dat_wts[:, np.newaxis]
+
     # Cast DATA to float and apply scale/offset
     # PSRFITS stores data in (bin, chan, pol) order
-
     real_data = data.astype(np.float64) 
-    print(real_data.shape)
-    real_data = real_data * dat_scl[:, np.newaxis, np.newaxis, :] + dat_offs[:, np.newaxis, np.newaxis, :]
+    real_data = (real_data * dat_scl[:, np.newaxis, np.newaxis, :] + dat_offs[:, np.newaxis, np.newaxis, :]) * dat_wts[:, np.newaxis, np.newaxis, :]
 
     #plt.figure()
     #plt.plot(dat_offs[0])
     #plt.plot(np.mean(real_data[0, :, 0, :], axis = 0))
     #plt.figure()
     #plt.plot(dat_offs[0] - np.mean(real_data[0, :, 0, :], axis = 0))
-
 
     real_data = real_data.reshape(-1, *real_data.shape[-2:])
     real_data = real_data[:nstot, :, :]
@@ -163,83 +172,94 @@ if __name__ == "__main__":
     path = Path(".")
     path = Path("data")
 
-    for filename in path.glob("*.psrfits"):
+    for filename in path.glob("*.fits"):
         print(f"Processing {filename.stem}")
 
         binning = 1
 
         data_2d, freqs, tl = read(filename)
         data_2d = data_2d.T
-        data_2d = bin_time(data_2d, binning)
 
         tl = tl * u.s
         freqs = freqs * u.MHz
-        
-        nchan = data_2d.shape[0]
-        fr = np.sum(data_2d, axis = 1)
+
+        if (data_2d.shape[0] > 1):
+            data_2d = bin_time(data_2d, binning)
+
+
+            nchan = data_2d.shape[0]
+            fr = np.sum(data_2d, axis = 1)
 
 
 
-        fig, ax = plt.subplots(2, 2, 
-                               width_ratios = [2, 1],
-                               height_ratios = [2, 1],
-                               )
+            fig, ax = plt.subplots(2, 2, 
+                                   width_ratios = [2, 1],
+                                   height_ratios = [2, 1],
+                                   )
 
-        fig.suptitle(filename.stem)
+            fig.suptitle(filename.stem)
 
-        extent = [tl[0].to_value(u.ms), tl[-1].to_value(u.ms), 
-                  freqs[0].to_value(u.MHz), freqs[-1].to_value(u.MHz)]
+            extent = [tl[0].to_value(u.ms), tl[-1].to_value(u.ms), 
+                      freqs[0].to_value(u.MHz), freqs[-1].to_value(u.MHz)]
 
-        ax[1, 1].set_visible(False)
-        ax[0, 0].sharex(ax[1, 0]) 
+            ax[1, 1].set_visible(False)
+            ax[0, 0].sharex(ax[1, 0]) 
 
 
 
-        sig = 3
-        clipped, lower, upper = sigmaclip(data_2d, sig, sig)
-
-        while len(data_2d[(data_2d > lower) & (data_2d < upper)])/len(data_2d.ravel()) < .5:
-            sig += 1
+            sig = 3
             clipped, lower, upper = sigmaclip(data_2d, sig, sig)
-            print(sig, upper, lower)
 
-            if sig > 10:
-                break
-            
+            while len(data_2d[(data_2d > lower) & (data_2d < upper)])/len(data_2d.ravel()) < .5:
+                sig += 1
+                clipped, lower, upper = sigmaclip(data_2d, sig, sig)
+                print(sig, upper, lower)
 
-
-
-        ax[0, 0].imshow(data_2d, 
-                        origin = "lower", 
-                        aspect = "auto",
-                        cmap = "Greys",
-                        extent = extent,
-                        vmin = lower,
-                        vmax = upper,
-                        interpolation = "none",
-                        )
-
-        ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))
+                if sig > 10:
+                    break
 
 
-        ax[0, 1].set_xscale("log")
-        ax[0, 1].plot(fr, freqs)
-        #fr[~mask] = np.nan
-        #ax[0, 1].plot(fr, freqs)
 
 
-        ax[0, 1].set_yticks([])
+            ax[0, 0].imshow(data_2d, 
+                            origin = "lower", 
+                            aspect = "auto",
+                            cmap = "Greys",
+                            extent = extent,
+                            vmin = lower,
+                            vmax = upper,
+                            interpolation = "none",
+                            )
 
-        ax[0, 0].set_ylabel("Frequency, MHz")
-        ax[0, 1].set_xlabel("FR Intensity")
-        ax[1, 0].set_xlabel("Time, ms")
-        ax[1, 0].set_ylabel("Integal Intensity")
+            ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))
+
+
+            ax[0, 1].set_xscale("log")
+            ax[0, 1].plot(fr, freqs)
+            #fr[~mask] = np.nan
+            #ax[0, 1].plot(fr, freqs)
+
+
+            ax[0, 1].set_yticks([])
+
+            ax[0, 0].set_ylabel("Frequency, MHz")
+            ax[0, 1].set_xlabel("FR Intensity")
+            ax[1, 0].set_xlabel("Time, ms")
+            ax[1, 0].set_ylabel("Integal Intensity")
 
 
 
         #ax[0, 0].set_xlim(280, 380)
+        else:
+
+            fig, ax = plt.subplots(1, 1)
+            fig.suptitle(filename.stem)
+
+            ax.plot(tl.to(u.ms), data_2d[0])
+            ax.set_xlabel("Time, ms")
+            ax.set_ylabel("Integal Intensity")
 
 
 
 
-    save_image("plot.pdf")
+    save_image("plot.pdf", tight = True)

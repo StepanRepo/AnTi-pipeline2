@@ -1,17 +1,17 @@
 // main.cpp
 #include <iostream>
-#include <vector>
-#include <complex>
 #include <string>
+#include <algorithm>
 #include <stdexcept>
 #include <fstream>
 #include <iomanip>
 #include <cstdlib>
 #include <filesystem>
 #include <yaml-cpp/yaml.h>
+#include <cctype> // For the C-style isspace
+
 
 #include "Profile.h" 
-#include "PSRFITS_Writer.h"
 
 std::string resolve_path(const std::string& input) 
 {
@@ -91,6 +91,41 @@ std::string get_format(const std::string &filename)
 	return "Unknown";
 }
 
+template<typename T>
+void read_key(const std::string& key, T* value, const YAML::Node& config, T* def = nullptr)
+{
+	if (config && config[key] && !config[key].IsNull())
+		*value = config[key].as<T>();
+	else if (def != nullptr)
+		*value = *def;
+	else
+		throw std::invalid_argument("There is no key: " + key + " in the provided configuration");
+}
+
+void load_mask(Profile &profile, const YAML::Node &config)
+{
+	std::string mask_file = "";
+	double std_threshold, tail_threshold;
+	size_t nchann = 0;
+	size_t max_len = 0;
+	bool filter = false;
+
+	read_key<size_t>("nchann", &nchann, config["options"]);
+	read_key<size_t>("max_len", &max_len, config["options"], &max_len);
+	read_key<std::string>("mask", &mask_file, config["options"], &mask_file);
+	read_key<bool>("filter", &filter, config["options"], &filter);
+
+
+	if (mask_file == "" && filter)
+	{
+		read_key<double>("tail_threshold", &tail_threshold, config["options"]);
+		read_key<double>("std_threshold",   &std_threshold, config["options"]);
+
+		profile.create_mask(nchann, std_threshold, tail_threshold, max_len);
+	}
+}
+
+
 
 YAML::Node config;
 
@@ -109,29 +144,60 @@ int main()
 
 
 	
+	// Setting general working configuration
+	// for the run
 	std::string mode;
 	std::string input_dir;
 	std::string output_dir;
 	std::string filename;
 	std::string site;
-	std::string parfile, ehemeris;
+	std::string parfile;
 	int verbose;
 	double buf_size;
+	double t0, t1;
 	bool save_raw, save_dyn, save_sum;
 
-	mode = config["general"]["mode"].as<std::string>();
-	input_dir = config["general"]["input_dir"].as<std::string>() + "/";
-	output_dir = config["general"]["output_dir"].as<std::string>() + "/";
-	site = config["general"]["site"].as<std::string>(); 
-	verbose = config["general"]["verbose"].as<int>(); 
+	if (!config["general"])
+		throw std::invalid_argument("The \"general\" section must present in the configuration file");
+	if (!config["options"])
+		throw std::invalid_argument("The \"options\" section must present in the configuration file");
+	if (!config["files"])
+		throw std::invalid_argument("The \"files\" section must present in the configuration file");
 
-	if (config["general"]["buf_size"] && !config["general"]["buf_size"].IsNull())
-		buf_size = config["general"]["buf_size"].as<double>(); 
-	else
-		buf_size = 2.0;
+	read_key<std::string>("mode", &mode, config["general"]);
 
+	std::string def_path = ".";
+	read_key<std::string>("input_dir", &input_dir, config["general"], &def_path);
+	read_key<std::string>("output_dir", &output_dir, config["general"], &def_path);
+	input_dir = input_dir + "/";
+	output_dir = output_dir + "/";
 	input_dir = resolve_path(input_dir);
 	output_dir = resolve_path(output_dir);
+
+
+	read_key<std::string>("site", &site, config["general"]);
+	read_key<int>("verbose", &verbose, config["general"], new int(1));
+
+	t0 = -1.0;
+	t1 = -1.0;
+	read_key("t0", &t0, config["general"], &t0);
+	read_key("t1", &t1, config["general"], &t1);
+
+	parfile = "";
+	read_key<std::string>("parfile", &parfile, config["general"], &parfile);
+
+
+
+	// Pre-processing mode variable
+	// convert the string to lowercase
+	std::transform(mode.begin(), mode.end(), mode.begin(),
+			[](unsigned char c){ return std::tolower(c); });
+	// strip whites
+	mode.erase(std::remove_if(mode.begin(), mode.end(), ::isspace), mode.end());
+
+
+	read_key<double>("buf_size", &buf_size, config["general"], new double(2.0));
+
 
 
 	std::string format = "Unknown";
@@ -139,16 +205,12 @@ int main()
 	save_dyn = false;
 	save_sum = false;
 
+	read_key<bool>("save_raw", &save_raw, config["general"], &save_raw);
+	read_key<bool>("save_dyn", &save_dyn, config["general"], &save_dyn);
+	read_key<bool>("save_sum", &save_sum, config["general"], &save_sum);
 
-	if (config["general"]["save_raw"] && !config["general"]["save_raw"].IsNull())
-		save_raw = config["general"]["save_raw"].as<bool>();
 
-	if (config["general"]["save_dyn"] && !config["general"]["save_dyn"].IsNull())
-		save_dyn = config["general"]["save_dyn"].as<bool>();
-
-	if (config["general"]["save_sum"] && !config["general"]["save_sum"].IsNull())
-		save_sum = config["general"]["save_sum"].as<bool>();
-
+	// Going through all provided files
 	for (const auto& filename_yaml : config["files"]) 
 	{
 
@@ -158,15 +220,12 @@ int main()
 
 		Profile profile(input_dir + filename, format, 
 				size_t(buf_size * 1024 * 1024 * 1024),
-				save_raw, save_dyn, save_sum); 
-
-		PSRFITS_Writer writer(profile, output_dir + filename + ".psrfits");
-
-
+				save_raw, save_dyn, save_sum, output_dir); 
 		BaseHeader* hdr = profile.getHeader();
-		if (!hdr) 
-			throw std::runtime_error("Header not available");
 
+
+
+		// Apply specific corrections to the file header
 		if (config["advanced"])
 		{
 			for (const auto& kv : config["advanced"]) 
@@ -174,140 +233,137 @@ int main()
 				const std::string key = kv.first.as<std::string>();
 				const std::string value = kv.second.as<std::string>();
 
-				hdr-> update_header(key, value);
+				hdr -> update_header(key, value);
 			}
 		}
 
 
-		hdr->print();
+		if (verbose > 0)
+			hdr->print();
 
-		if (config["general"]["t0"] && !config["general"]["t0"].IsNull())
-			profile.reader->skip(config["general"]["t0"].as<double>());
+		// Cutting a piece from the file if needed
+		if (t0 > 0.0)
+			profile.reader->skip(t0);
 
-		if (config["general"]["t1"] && !config["general"]["t1"].IsNull())
-			profile.reader->set_limit(config["general"]["t1"].as<double>());
+		if (t1 > 0.0)
+			profile.reader->set_limit(t1);
 
 
 
 		// Find redshift correction if the parameter file is available
-		if (config["general"]["parfile"] && !config["general"]["parfile"].IsNull())
+		// if not, the redshift is defaulted to zero
+		if (parfile != "")
 		{
 			parfile = input_dir + config["general"]["parfile"].as<std::string>();
 			profile.get_redshift(parfile, site);
 		}
 
 
-		if (mode == "dedisperse")
+		if (mode == "fold")
 		{
-			size_t nchann = config["options"]["nchann"].as<size_t>();
-			std::string mask_file = "";
-			double sig_threshold, tail_threshold;
+			// Parse mode-specific options
+			size_t nchann = 0;
+			std::string t2_pred_file = "";
+			std::string ddtype = "";
 
-			if (config["options"] && config["options"]["mask"]) 
-				if(!config["options"]["mask"].IsNull())
-					mask_file = config["options"]["mask"].as<std::string>();
 
-			if (mask_file == "" && config["options"] && config["options"]["filter"])
+			read_key<size_t>("nchann", &nchann, config["options"], &nchann);
+			read_key<std::string>("t2pred", &t2_pred_file, config["options"], &t2_pred_file);
+			read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
+
+			load_mask(profile, config);
+
+			if (ddtype == "incoherent")
 			{
-				if (config["options"]["filter"].as<bool>())
-				{
-					if (config["options"]["tail_threshold"].IsNull())
-						throw std::runtime_error("Tail threshold should be provided to perform filtration");
 
-					if (config["options"]["std_threshold"].IsNull())
-						throw std::runtime_error("STD threshold should be provided to perform filtration");
-					sig_threshold = config["options"]["std_threshold"].as<double>();
-					tail_threshold = config["options"]["tail_threshold"].as<double>();
-					profile.create_mask(nchann, sig_threshold, tail_threshold);
+				if (t2_pred_file != "")
+				{
+					profile.fold_dyn(input_dir + t2_pred_file, nchann);
 				}
+				else 
+				{
+					profile.fold_dyn(hdr->period, nchann);
+				}
+
+				profile.dedisperse_incoherent(hdr->dm, nchann);
 			}
-
-
-			if (config["options"]["fold"].as<bool>())
+			else if (ddtype == "coherent")
 			{
-
-				if (save_raw || save_dyn || save_sum)
-					writer.createPrimaryHDU("PSR");
-
-
-				std::string t2_pred_file = "";
-
-				if (config["options"] && config["options"]["t2pred"]) 
-					if (! config["options"]["t2pred"].IsNull()) 
-						t2_pred_file = config["options"]["t2pred"].as<std::string>();
-
-				if (config["options"]["ddtype"].as<std::string>() == "incoherent")
-				{
-
-					if (t2_pred_file != "")
-					{
-						profile.fold_dyn(
-								input_dir + config["options"]["t2pred"].as<std::string>(), 
-								nchann);
-
-					}
-					else 
-					{
-						profile.fold_dyn(hdr->period, nchann);
-					}
-
-					profile.dedisperse_incoherent(hdr->dm, nchann);
-
-
-				}
-				else if (config["options"]["ddtype"].as<std::string>() == "coherent")
-				{
-					profile.dedisperse_coherent(hdr->dm, nchann);
-				}
-				else
-				{
-					throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
-				}
-
-
-				// save the results in fold mode
-				if(save_raw)
-					writer.append_subint_fold(profile.raw, hdr->obs_window, hdr->nchann, 1);
-
-				if(save_dyn)
-					writer.append_subint_fold(profile.dyn, hdr->obs_window, hdr->nchann, 1);
-
-				if(save_sum)
-					writer.append_subint_fold(profile.sum, hdr->obs_window, 1, 1);
+				profile.dedisperse_coherent(hdr->dm, nchann);
 			}
 			else
 			{
-				if (save_raw || save_dyn || save_sum)
-					writer.createPrimaryHDU("SEARCH");
-
-				std::string id = "";
-
-				if (config["options"]["ddtype"].as<std::string>() == "incoherent")
-				{
-					id = profile.dedisperse_incoherent_stream (hdr->dm, nchann);
-				}
-				else if (config["options"]["ddtype"].as<std::string>() == "coherent")
-				{
-					id = profile.dedisperse_coherent_stream (hdr->dm, nchann);
-				}
-				else
-					throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
-
-				if(save_raw)
-				{
-					writer.append_subint_stream("raw_"+id, hdr->nchann, 1);
-				}
-
-				if(save_dyn)
-					writer.append_subint_stream("dyn_"+id, hdr->nchann, 1);
-
-				if(save_sum)
-					writer.append_subint_stream("sum_"+id, 1, 1);
+				throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
 			}
 
+		}
+		else if (mode == "stream")
+		{
+			size_t nchann = 0;
+			std::string ddtype = "";
 
+
+			read_key<size_t>("nchann", &nchann, config["options"], &nchann);
+			read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
+
+			load_mask(profile, config);
+
+			if (ddtype == "incoherent")
+			{
+				profile.dedisperse_incoherent_stream(hdr->dm, nchann);
+			}
+			else if (ddtype == "coherent")
+			{
+				profile.dedisperse_coherent_stream(hdr->dm, nchann);
+			}
+			else
+			{
+				throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
+			}
 
 		}
+		else if (mode == "stream")
+		{
+			size_t nchann = 0;
+			std::string ddtype = "";
+
+
+			read_key<size_t>("nchann", &nchann, config["options"], &nchann);
+			read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
+
+			load_mask(profile, config);
+		}
+		else if (mode == "search")
+		{
+			// Parse mode-specific options
+			size_t nchann = 0;
+			std::string ddtype = "";
+
+
+			read_key<size_t>("nchann", &nchann, config["options"], &nchann);
+			read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
+
+			load_mask(profile, config);
+
+			if (ddtype == "incoherent")
+			{
+				profile.dedisperse_incoherent_search(hdr->dm, nchann);
+			}
+			else if (ddtype == "coherent")
+			{
+			}
+			else
+			{
+				throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
+			}
+		}
+		else
+		{
+			throw("Unknown processing mode: " + mode);
+		}
+
+
+
 	}
 
 

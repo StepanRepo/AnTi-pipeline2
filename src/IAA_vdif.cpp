@@ -15,6 +15,7 @@
 #include <cstring>    // For std::memcpy, std::memmove
 #include <limits>     // For std::numeric_limits (if needed for validation)
 #include <algorithm>  // For std::min (if needed for safer copying)
+#include <filesystem> // For std::filesystem::path.stem()
 					  
 
 
@@ -241,15 +242,15 @@ void VDIFHeader::decode(const char* byte_array)
 IAA_vdif::IAA_vdif(const std::string& filename_in, size_t buffer_size):
 	BaseReader(), current_header{}, header{} // Initialize the base class part first 
 {
-		std::cout << 123 << std::endl; 
 		// CRITICAL: Define base class member
 		// to point at the right header
 		header_ptr = &header;
 
 		n_read = 0;
 
-		filename = filename_in;
-		file.open(filename, std::ios::binary);
+		std::filesystem::path p = filename_in;
+		filename = p.stem();
+		file.open(p, std::ios::binary);
 		is_open = file.is_open();
 
 		if (!is_open) 
@@ -462,12 +463,12 @@ bool IAA_vdif::fill_buffer()
 	// Use the time of the frame that *will* be read next as the starting point for gap calculation.
 	// This requires knowing the header of the *next* frame. We can use the current header
 	// as the 'previous' time for the *first* frame read in this loop.
-	t_prev = (header.t - header.t0) * 86400.0L; // Convert time difference to seconds
+	t_prev = (current_header.t - header.t0) * 86400.0L; // Convert time difference to seconds
 
 	// Loop to read frames until the buffer is full or EOF is reached
 	while (n_read < header.CUT_SIZE && read_frame()) 
 	{ // Keep calling read_frame until it returns false (EOF or buffer full)
-		t_cur = (header.t - header.t0) * 86400.0L; // Get current frame time in seconds
+		t_cur = (current_header.t - header.t0) * 86400.0L; // Get current frame time in seconds
 		n_read += header.n_samples;
 
 		// Check if there's a significant gap in time between the previous and current frame

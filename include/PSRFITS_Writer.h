@@ -24,7 +24,7 @@ class PSRFITS_Writer
 		 * @brief Constructor.
 		 * @param filename Output PSRFITS filename.
 		 */
-		PSRFITS_Writer(Profile& profile_in, std::string filename);
+		PSRFITS_Writer(std::string filename);
 
 		/**
 		 * @brief Destructor.
@@ -37,19 +37,16 @@ class PSRFITS_Writer
 		 * @param header The BaseHeader object.
 		 * @return True if successful.
 		 */
-		bool createPrimaryHDU(std::string obs_mode);
-		bool append_history(const size_t nsubint, const size_t npol, const size_t nchan, const size_t nbin, double dm = 0.0, std::string dds_mtd = "", bool wheighted = false);
-		bool append_subint_fold(double *data_double, const size_t nbin, const size_t nchan, const size_t npol) ;
-		bool append_subint_stream(std::string stream_file, const size_t nchan, const size_t npol, bool cmp = false);
-		bool append_subint_search(double *data_double, const size_t nbin, const size_t nchan, const size_t npol, bool cmp = false);
+		bool createPrimaryHDU(std::string obs_mode, const BaseHeader* header);
+		bool append_history(const size_t nsubint, const size_t npol, const size_t nchan, const size_t nbin, const double dm, const double fmin, const double fmax, const double fcomp, const double tau, std::string dds_mtd = "", const double* mask = nullptr);
+		bool append_subint_fold(double *data_double, double *mask, const size_t nbin, const size_t nchan, const size_t npol, const double period, const double dm, const double fmin, const double fmax, const double tau);
+		bool append_subint_stream(std::string stream_file, double *mask, const size_t nchan, const size_t npol, const double dm, const double fmin, const double fmax, const double tau, const bool cmp = false);
+		bool append_subint_search(double* data_double, double *mask, const size_t nbin, const size_t nchan, const size_t npol, const double dm, const double fmin, const double fmax, const double tau, bool cmp = false);
 
 	private:
 		fitsfile* fptr; // CFITSIO file pointer
 		int status;     // CFITSIO status code
 
-
-		Profile *profile;
-		BaseHeader *header;
 
 		void check_status(std::string operation);
 

@@ -15,7 +15,9 @@
 #include <limits>     // For std::numeric_limits (if needed for validation)
 #include <algorithm>  // For std::min, std::fill_n, std::remove_if
 #include <cctype>     // For std::isspace
-#include <fftw3.h>      // For FFTW library types (fftw_complex, fftw_plan)
+#include <fftw3.h>    // For FFTW library types (fftw_complex, fftw_plan)
+#include <filesystem> // For std::filesystem::path.stem()
+
 
 // --- Helper Function Implementations ---
 
@@ -252,8 +254,10 @@ PRAO_adc::PRAO_adc(const std::string& filename_in, size_t buffer_size):
 
     header_ptr = &header; // <--- CRITICAL: Set the base class's header_ptr member here
 
-    filename = filename_in;
-    file.open(filename, std::ios::binary);
+	std::filesystem::path p = filename_in;
+    filename = p.stem();
+
+    file.open(p, std::ios::binary);
     is_open = file.is_open();
 
     if (!is_open) 

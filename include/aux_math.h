@@ -16,8 +16,12 @@ namespace math
 
     // --- Statistics ---
     double mean(double* a, size_t n);
+    double median(double* a, size_t n);
     double var(double *a, size_t n, double ddof = 0.0);
-    void sigmaclip(double *a, bool *mask, size_t n, double threshold);
+    void sigmaclip(double *a, bool *mask, size_t n, double threshold, double* mu = nullptr, double* sigma = nullptr);
+
+    // --- Time-domain profile processing ---
+	void subtract_baseline(double *data, size_t n, size_t window_size);
 
     // --- FITS Layout Conversion ---
     // Converts nD data from C-Style (Row-Major) to Fortran-Style (Col-Major)

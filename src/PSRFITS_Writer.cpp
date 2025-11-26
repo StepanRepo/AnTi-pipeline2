@@ -69,42 +69,43 @@ inline void quantize(double *data, size_t nbin, size_t nchan,
     const double bit_range = static_cast<double>((1ULL << nbit) - 1);
 
     // --- 2. Compute per-channel min/max ---
-    for (size_t i = 0; i < nsamp; ++i) 
+    for (size_t i = 0; i < nbin; ++i) 
 	{
-        size_t f = i % nchan;
-        double val = data[i];
-        if (val < min_val[f]) min_val[f] = val;
-        if (val > max_val[f]) max_val[f] = val;
-    }
+		for (size_t f = 0; f < nchan; ++f) 
+		{
+			double val = data[i*nchan + f];
+			if (val < min_val[f]) min_val[f] = val;
+			if (val > max_val[f]) max_val[f] = val;
+		}
+	}
 
-    // --- 3. Compute scaling and offset ---
-    for (size_t f = 0; f < nchan; ++f) 
+
+
+	// --- 3. Compute scaling and offset ---
+	for (size_t f = 0; f < nchan; ++f) 
 	{
 		// Signed int → use midpoint
 		dat_offs[f] = static_cast<float>((min_val[f] + max_val[f]) / 2.0);
 		double range = max_val[f] - min_val[f];
 		dat_scl[f] = (range == 0.0) ? 1.0f : static_cast<float>(range / bit_range);
-    }
+	}
 
-    // --- 4. Normalize data to quantized float range ---
-    for (size_t i = 0; i < nsamp; ++i) 
-	{
-        size_t f = i % nchan;
-        data[i] = (data[i] - dat_offs[f]) / dat_scl[f];
-    }
 
 	std::fill(quantized, quantized + nsamp * nbit/8, 0.0);
 
-    if (nbit == 16) 
+	if (nbit == 16) 
 	{
-        // Fold mode: one sample = one int16_t (big-endian for FITS)
-        for (size_t i = 0; i < nsamp; ++i) 
+		// Fold mode: one sample = one int16_t (big-endian for FITS)
+		for (size_t i = 0; i < nsamp; ++i) 
 		{
-            int16_t q = std::llround(data[i]);
-            uint16_t u = static_cast<uint16_t>(static_cast<int16_t>(q));
+			size_t f = i % nchan;
+			double normilized = (data[i] - dat_offs[f]) / dat_scl[f];
+			int64_t q = std::llround(normilized);
 
-            quantized[i*2 + 0] = u & 0xFF;
-            quantized[i*2 + 1] = (u >> 8) & 0xFF;
+			uint16_t u = static_cast<uint16_t>(static_cast<int16_t>(q));
+
+			quantized[i*2 + 0] = u & 0xFF;
+			quantized[i*2 + 1] = (u >> 8) & 0xFF;
         }
     } 
 	else 
@@ -114,7 +115,9 @@ inline void quantize(double *data, size_t nbin, size_t nchan,
 
         for (size_t i = 0; i < nsamp; ++i) 
 		{
-            int64_t q = std::llround(data[i]);
+			size_t f = i % nchan;
+			double normilized = (data[i] - dat_offs[f]) / dat_scl[f];
+            int64_t q = std::llround(normilized);
             uint8_t sample = static_cast<uint8_t>(q);
 
             size_t byte_idx = i / samples_per_byte;
@@ -141,19 +144,16 @@ void PSRFITS_Writer::check_status(std::string operation)
 
 
 
-PSRFITS_Writer::PSRFITS_Writer(Profile& profile_in, std::string filename)
+PSRFITS_Writer::PSRFITS_Writer(std::string filename)
     : fptr(nullptr), status(0) 
 {
     // Create new FITS file
 	// ! in the beginning overwrites 
 	// the file if it's already exists
-    fits_create_file(&fptr, ("!" + filename).c_str(), &status);
+    fits_create_file(&fptr, ("!" + filename + ".fits").c_str(), &status);
 	fits_create_img(fptr, BYTE_IMG, 0, 0, &status);
 
 	check_status("Creating FITS file");
-
-	profile = &profile_in;
-	header = profile->getHeader();
 }
 
 PSRFITS_Writer::~PSRFITS_Writer() 
@@ -165,7 +165,7 @@ PSRFITS_Writer::~PSRFITS_Writer()
 	}
 }
 
-bool PSRFITS_Writer::createPrimaryHDU(std::string obs_mode) 
+bool PSRFITS_Writer::createPrimaryHDU(std::string obs_mode, const BaseHeader* header) 
 {
     // Basic FITS preamble
     fits_write_key(fptr, TSTRING, "COMMENT", (void*)"FITS (Flexible Image Transport System) format defined in Astronomy and", nullptr, &status);
@@ -215,7 +215,7 @@ bool PSRFITS_Writer::createPrimaryHDU(std::string obs_mode)
     double obsbw = std::abs(header->fmax - header->fmin);
     fits_write_key(fptr, TDOUBLE, "OBSFREQ", &obsfreq, "[MHz] Centre frequency for observation", &status);
     fits_write_key(fptr, TDOUBLE, "OBSBW", &obsbw, "[MHz] Bandwidth for observation", &status);
-    fits_write_key(fptr, TINT,    "OBSNCHAN", &(header->nchann), "Number of frequency channels", &status);
+    fits_write_key(fptr, TINT,    "OBSNCHAN", (void*)&(header->nchann), "Number of frequency channels", &status);
     fits_write_key(fptr, TDOUBLE, "CHAN_DM", new double(0.0), "[cm-3 pc] DM used for on-line dedispersion", &status);
     fits_write_key(fptr, TINT,    "STT_IMJD", new int(header->t0), "[days] Start MJD (UTC)", &status);
     fits_write_key(fptr, TDOUBLE, "STT_SMJD", new double(fmod(header->t0, 1.0)*86400.0), "[s] Start time (sec past UTC 00h)", &status);
@@ -227,7 +227,7 @@ bool PSRFITS_Writer::createPrimaryHDU(std::string obs_mode)
     return true;
 }
 
-bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, const size_t nchan, const size_t nbin, double dm, std::string dds_mtd, bool wheighted)
+bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, const size_t nchan, const size_t nbin, const double dm, const double fmin, const double fmax, const double fcomp, const double tau, std::string dds_mtd, const double* mask)
 {
     if (!fptr) 
 	{
@@ -291,13 +291,13 @@ bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, con
 		"32A",  // RM_MODEL    21
 		"1I",   // AUX_RM_C    22
 		"32A",  // DM_MODEL    23
-		"1I",   // AUX_DM_C     24
-		"1I",
-		"1D",
-		"1I",
-		"1I",
-		"1I"
-	};
+		"1I",   // AUX_DM_C    24
+		"1I",   //  NBIN_PRD   25
+		"1D",   //  REF_FREQ   26
+		"1I",   //  PR_CORR    27
+		"1I",   //  FD_CORR    28
+		"1I"    //  BE_CORR    29
+	};           
 	const char *tunit[] = {"", "", "", "", "", "", "", "s", "MHz", "", "MHz", "CM-3 PC", "RAD M-2", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 
     fits_create_tbl(fptr, BINARY_TBL, 1, 29,
@@ -309,15 +309,15 @@ bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, con
 	check_status("Creating HISTORY binary table");
 
 	double ctr_freq = 0.0;
-	double bw = header->fmax - header->fmin;
+	double bw = fmax - fmin;
 	double chan_bw = bw / double(nchan);
 
 	std::string rfi_mtd = "";
 
-    if (profile->mask && wheighted) 
+    if (mask) 
 	{
         for (size_t i = 0; i < nchan; ++i) 
-            ctr_freq = profile->mask[i] * (header->fmin + (double(i)+.5)*chan_bw);
+            ctr_freq = mask[i] * (fmin + (double(i)+.5)*chan_bw);
 
 		ctr_freq = ctr_freq / double(nchan);
 
@@ -325,7 +325,7 @@ bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, con
     } 
 	else 
 	{
-		ctr_freq = (header->fmin + header->fmax) / 2.0;
+		ctr_freq = (fmin + fmax) / 2.0;
     }
 
 	bw = std::abs(bw);
@@ -349,7 +349,7 @@ bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, con
 	fits_write_col(fptr, TLONG,     5, 1, 1, 1, new long(nsubint), &status);
 	fits_write_col(fptr, TINT,      6, 1, 1, 1, (void*)&npol, &status);
 	fits_write_col(fptr, TINT,      7, 1, 1, 1, (void*)&nbin, &status);
-	fits_write_col(fptr, TDOUBLE,   8, 1, 1, 1, new double((header->tau)*1e-3), &status);
+	fits_write_col(fptr, TDOUBLE,   8, 1, 1, 1, new double(tau*1e-3), &status);
 	fits_write_col(fptr, TDOUBLE,   9, 1, 1, 1, (void*)&ctr_freq, &status);
 	fits_write_col(fptr, TLONG,    10, 1, 1, 1, (void*)&nchan, &status);
 	fits_write_col(fptr, TDOUBLE,  11, 1, 1, 1, (void*)&chan_bw, &status);
@@ -367,7 +367,7 @@ bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, con
 	fits_write_col(fptr, TBYTE,    23, 1, 1, 32, convert_str("NONE", 32), &status);
 	fits_write_col(fptr, TINT,     24, 1, 1, 1, new int(0), &status);
 	fits_write_col(fptr, TINT,     25, 1, 1, 1, new int(1), &status);
-	fits_write_col(fptr, TDOUBLE,  26, 1, 1, 1, &(header->fcomp), &status);
+	fits_write_col(fptr, TDOUBLE,  26, 1, 1, 1, (void*) &(fcomp), &status);
 	fits_write_col(fptr, TINT,     27, 1, 1, 1, new int(0), &status);
 	fits_write_col(fptr, TINT,     28, 1, 1, 1, new int(0), &status);
 	fits_write_col(fptr, TINT,     29, 1, 1, 1, new int(0), &status);
@@ -380,7 +380,7 @@ bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, con
 }
 
 
-bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, const size_t nchan, const size_t npol) 
+bool PSRFITS_Writer::append_subint_fold(double *data_double, double *mask, const size_t nbin, const size_t nchan, const size_t npol, const double period, const double dm, const double fmin, const double fmax, const double tau) 
 {
     if (!fptr) 
 	{
@@ -412,7 +412,7 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
 	long naxes[3] = {long(nbin), long(nchan), long(npol)};
 	fits_write_tdim(fptr, 8, naxis, naxes, &status);
 	
-	double dB = std::abs(header->fmax - header->fmin) / double(nchan);
+	double dB = std::abs(fmax - fmin) / double(nchan);
 
 	// Additional keys
     fits_write_key(fptr, TSTRING, "EPOCHS", (void*) "STT_MJD", "Epoch convention (VALID, MIDTIME, STT_MJD)", &status);
@@ -421,12 +421,12 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
     fits_write_key(fptr, TSTRING, "SCALE", (void*) "FluxDen", "Intensity units (FluxDen/RefFlux/Jansky)", &status);
     fits_write_key(fptr, TSTRING, "POL_TYPE", (void*) "NONE", "Polarisation identifier (e.g., AABBCRCI, AA+BB)", &status);
     fits_write_key(fptr, TINT,    "NPOL", new int (1), "Number of polarisations", &status); // Assuming 1 pol
-    fits_write_key(fptr, TDOUBLE, "TBIN", new double(header->tau*1.0e-3), "[s] Time per bin/sample", &status);
+    fits_write_key(fptr, TDOUBLE, "TBIN", new double(tau*1.0e-3), "[s] Time per bin/sample", &status);
     fits_write_key(fptr, TINT,    "NBIN", (void*) &nbin, "Nr of bins (PSR/CAL mode; else 1)", &status); 
     fits_write_key(fptr, TDOUBLE, "PHS_OFFS", new double(0.0), "Phase offset of bin 0 for gated data", &status); 
     fits_write_key(fptr, TINT,    "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
     fits_write_key(fptr, TDOUBLE, "CHAN_BW", &dB, "[MHz] Channel/sub-band width", &status);
-    fits_write_key(fptr, TDOUBLE, "DM", &(header->dm), "[cm-3 pc] DM used for dedispersion", &status);
+    fits_write_key(fptr, TDOUBLE, "DM", (void*)&(dm), "[cm-3 pc] DM used for dedispersion", &status);
     fits_write_key(fptr, TDOUBLE, "RM", new double(0.0), "[rad m-2] RM for post-detection deFaraday", &status);
     fits_write_key(fptr, TINT,    "NCHNOFFS", new int(0), "Channel/sub-band offset for split files", &status);
 
@@ -434,11 +434,6 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
 
 	check_status("Creating SUBINT (dynamic profile) bin table");
 
-    if (!profile->dyn) 
-	{
-        std::cerr << "Profile data (dyn) is null." << std::endl;
-        return false;
-    }
 
     // --- 2. Compute DAT_OFFS and DAT_SCL per channel
     std::vector<float> dat_offs(nchan * npol);
@@ -456,16 +451,16 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
 
     // --- 3. Prepare frequency array (linear spacing)
     std::vector<double> dat_freq(nchan);
-    double df = (header->fmax - header->fmin) / nchan;
+    double df = (fmax - fmin) / nchan;
     for (size_t i = 0; i < nchan; ++i) 
-        dat_freq[i] = header->fmin + (i + 0.5) * df;
+        dat_freq[i] = fmin + (i + 0.5) * df;
 
     // --- 4. Prepare mask (DAT_WTS)
     std::vector<float> dat_wts(nchan);
-    if (profile->mask) 
+    if (mask) 
 	{
         for (size_t i = 0; i < nchan; ++i) 
-            dat_wts[i] = static_cast<float>(profile->mask[i]);
+            dat_wts[i] = static_cast<float>(mask[i]);
 
 		// Clamp to [0,1] per PSRFITS spec
         for (size_t i = 0; i < nchan; ++i) 
@@ -481,7 +476,7 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
     long row = static_cast<long>(subint_index + 1);
 
     // TSUBINT and OFFS_SUB 
-    double tsubint = header->tau * nbin * 1.0e-3; // Total subint duration
+    double tsubint = tau * nbin * 1.0e-3; // Total subint duration
     double offs_sub = (subint_index + 0.5) * tsubint; // Center of subint
 									
     fits_write_col(fptr, TDOUBLE, 1, row, 1, 1, &tsubint, &status);
@@ -495,7 +490,7 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
     fits_write_col(fptr, TFLOAT, 5, row, 1, nchan * npol, dat_offs.data(), &status);
     fits_write_col(fptr, TFLOAT, 6, row, 1, nchan * npol, dat_scl.data(), &status);
 
-    fits_write_col(fptr, TDOUBLE, 7, row, 1, 1, new double(header->period), &status);
+    fits_write_col(fptr, TDOUBLE, 7, row, 1, 1, new double(period), &status);
 
     // DATA (int16)
     fits_write_col(fptr, TSHORT, 8, row, 1, nbin * nchan * npol, data_int.data(), &status);
@@ -506,7 +501,7 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, const size_t nbin, 
 }
 
 
-bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t nchan, const size_t npol, bool cmp)
+bool PSRFITS_Writer::append_subint_stream(std::string stream_file, double *mask, const size_t nchan, const size_t npol, const double dm, const double fmin, const double fmax, const double tau, const bool cmp)
 {
     if (!fptr) 
 	{
@@ -525,15 +520,10 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t 
 	nstot = nstot / (nchan*npol);
     stream.seekg(0, std::ios::beg);
 
-	if (cmp)
-		nstot = nstot / 2;
 
 	long nsubint = nstot / (nsblk*nbits/8);
 	if ((nstot/nchan/npol) % (nsblk*nbits/8) != 0)
 		nsubint += 1;
-
-	append_history(nsubint, npol, nchan, 1, header->dm, "none");
-
 
     // Fixed parameters for search-mode
 
@@ -569,7 +559,7 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t 
     fits_write_key(fptr, TSTRING, "SCALE", (void*) "FluxDen", "Intensity units (FluxDen/RefFlux/Jansky)", &status);
     fits_write_key(fptr, TSTRING, "POL_TYPE", (void*) "NONE", "Polarisation identifier (e.g., AABBCRCI, AA+BB)", &status);
     fits_write_key(fptr, TINT, "NPOL", (void*)&npol, "Number of polarisations", &status); // Assuming 1 pol
-    fits_write_key(fptr, TDOUBLE, "TBIN", new double(header->tau*1.0e-3), "[s] Time per bin/sample", &status);
+    fits_write_key(fptr, TDOUBLE, "TBIN", new double(tau*1.0e-3), "[s] Time per bin/sample", &status);
     fits_write_key(fptr, TINT, "NBIN", new int(1), "Nr of bins (PSR/CAL mode; else 1)", &status); 
     fits_write_key(fptr, TDOUBLE, "PHS_OFFS", new double(0.0), "Phase offset of bin 0 for gated data", &status); 
     fits_write_key(fptr, TINT, "NBITS", &nbits, "Nr of bits/datum (SEARCH mode data, else 1)", &status); 
@@ -578,29 +568,30 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t 
     fits_write_key(fptr, TINT, "NSUBOFFS", new int(0), "Subint offset (Contiguous SEARCH-mode files)", &status); 
     fits_write_key(fptr, TINT, "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
     fits_write_key(fptr, TINT, "NCH_STRT", new int(0), "Channel/sub-band offset for split files", &status);
-	double dB = std::abs(header->fmax - header->fmin) / double(nchan);
+	double dB = std::abs(fmax - fmin) / double(nchan);
     fits_write_key(fptr, TDOUBLE, "CHAN_BW", &dB, "[MHz] Channel/sub-band width", &status);
-    fits_write_key(fptr, TDOUBLE, "DM", &(header->dm), "[cm-3 pc] DM used for dedispersion", &status);
+    fits_write_key(fptr, TDOUBLE, "DM", (void*) &(dm), "[cm-3 pc] DM used for dedispersion", &status);
     fits_write_key(fptr, TDOUBLE, "RM", new double(0.0), "[rad m-2] RM for post-detection deFaraday", &status);
     fits_write_key(fptr, TINT, "NCHNOFFS", new int(0), "Channel/sub-band offset for split files", &status);
     fits_write_key(fptr, TINT, "NSBLK", &nsblk, "Samples/row (SEARCH mode, else 1)", &status); 
     fits_write_key(fptr, TINT, "NSTOT", &nstot, "Total number of samples (SEARCH mode, else 1)", &status); 
 
     fits_write_key(fptr, TINT, "EXTVER", new int(1), "auto assigned by template parser ", &status);
+    fits_write_key(fptr, TINT, "CMPLX",  (void*)&cmp, "auto assigned by template parser ", &status);
 
 
     // Prepare frequency array (linear spacing)
     std::vector<double> dat_freq(nchan);
-    double df = (header->fmax - header->fmin) / nchan;
+    double df = (fmax - fmin) / nchan;
     for (size_t i = 0; i < nchan; ++i) 
-        dat_freq[i] = header->fmin + (i + 0.5) * df;
+        dat_freq[i] = fmin + (i + 0.5) * df;
 
     // Prepare mask (DAT_WTS)
     std::vector<float> dat_wts(nchan);
-    if (profile->mask) 
+    if (mask) 
 	{
         for (size_t i = 0; i < nchan; ++i) 
-            dat_wts[i] = static_cast<float>(profile->mask[i]);
+            dat_wts[i] = static_cast<float>(mask[i]);
 
 		// Clamp to [0,1] per PSRFITS spec
         for (size_t i = 0; i < nchan; ++i) 
@@ -639,7 +630,7 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t 
 				dat_scl.data(), dat_offs.data());
 
 		// TSUBINT and OFFS_SUB 
-		double tsubint = header->tau * actually_read * 1.0e-3; // Total subint duration
+		double tsubint = tau * actually_read * 1.0e-3; // Total subint duration
 		double offs_sub = (double(row) - 0.5) * tsubint; // Center of subint
 
 		fits_write_col(fptr, TDOUBLE, 1, row, 1, 1, &tsubint, &status);
@@ -669,7 +660,7 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, const size_t 
 }
 
 
-bool PSRFITS_Writer::append_subint_search(double* data_double, const size_t nbin, const size_t nchan, const size_t npol, bool cmp)
+bool PSRFITS_Writer::append_subint_search(double* data_double, double *mask, const size_t nbin, const size_t nchan, const size_t npol, const double dm, const double fmin, const double fmax, const double tau, const bool cmp)
 {
     if (!fptr) 
 	{
@@ -681,8 +672,6 @@ bool PSRFITS_Writer::append_subint_search(double* data_double, const size_t nbin
 	int nbits = 8;
 
 	size_t nstot = nbin;
-	if (cmp)
-		nstot = nstot * 2;
 
 	long nsubint = nstot / nsblk;
 	if ((nstot/nchan/npol) % nsblk != 0)
@@ -720,7 +709,7 @@ bool PSRFITS_Writer::append_subint_search(double* data_double, const size_t nbin
     fits_write_key(fptr, TSTRING, "SCALE", (void*) "FluxDen", "Intensity units (FluxDen/RefFlux/Jansky)", &status);
     fits_write_key(fptr, TSTRING, "POL_TYPE", (void*) "NONE", "Polarisation identifier (e.g., AABBCRCI, AA+BB)", &status);
     fits_write_key(fptr, TINT, "NPOL", new int (1), "Number of polarisations", &status); // Assuming 1 pol
-    fits_write_key(fptr, TDOUBLE, "TBIN", new double(header->tau*1.0e-3), "[s] Time per bin/sample", &status);
+    fits_write_key(fptr, TDOUBLE, "TBIN", new double(tau*1.0e-3), "[s] Time per bin/sample", &status);
     fits_write_key(fptr, TINT, "NBIN", new int(1), "Nr of bins (PSR/CAL mode; else 1)", &status); 
     fits_write_key(fptr, TDOUBLE, "PHS_OFFS", new double(0.0), "Phase offset of bin 0 for gated data", &status); 
     fits_write_key(fptr, TINT, "NBITS", &nbits, "Nr of bits/datum (SEARCH mode data, else 1)", &status); 
@@ -728,29 +717,30 @@ bool PSRFITS_Writer::append_subint_search(double* data_double, const size_t nbin
     fits_write_key(fptr, TINT, "SIGNINT", new int(1), "1 for signed ints in SEARCH-mode data, else 0", &status); 
     fits_write_key(fptr, TINT, "NSUBOFFS", new int(0), "Subint offset (Contiguous SEARCH-mode files)", &status); 
     fits_write_key(fptr, TINT, "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
-	double dB = std::abs(header->fmax - header->fmin) / double(nchan);
+	double dB = std::abs(fmax - fmin) / double(nchan);
     fits_write_key(fptr, TDOUBLE, "CHAN_BW", &dB, "[MHz] Channel/sub-band width", &status);
-    fits_write_key(fptr, TDOUBLE, "DM", &(header->dm), "[cm-3 pc] DM used for dedispersion", &status);
+    fits_write_key(fptr, TDOUBLE, "DM", (void*) &(dm), "[cm-3 pc] DM used for dedispersion", &status);
     fits_write_key(fptr, TDOUBLE, "RM", new double(0.0), "[rad m-2] RM for post-detection deFaraday", &status);
     fits_write_key(fptr, TINT, "NCHNOFFS", new int(0), "Channel/sub-band offset for split files", &status);
     fits_write_key(fptr, TINT, "NSBLK", &nsblk, "Samples/row (SEARCH mode, else 1)", &status); 
     fits_write_key(fptr, TINT, "NSTOT", &nstot, "Total number of samples (SEARCH mode, else 1)", &status); 
 
     fits_write_key(fptr, TINT, "EXTVER", new int(1), "auto assigned by template parser ", &status);
+    fits_write_key(fptr, TINT, "CMPLX",  (void*)&cmp, "auto assigned by template parser ", &status);
 
 
     // Prepare frequency array (linear spacing)
     std::vector<double> dat_freq(nchan);
-    double df = (header->fmax - header->fmin) / nchan;
+    double df = (fmax - fmin) / nchan;
     for (size_t i = 0; i < nchan; ++i) 
-        dat_freq[i] = header->fmin + (i + 0.5) * df;
+        dat_freq[i] = fmin + (i + 0.5) * df;
 
     // Prepare mask (DAT_WTS)
     std::vector<float> dat_wts(nchan);
-    if (profile->mask) 
+    if (mask) 
 	{
         for (size_t i = 0; i < nchan; ++i) 
-            dat_wts[i] = static_cast<float>(profile->mask[i]);
+            dat_wts[i] = static_cast<float>(mask[i]);
 
 		// Clamp to [0,1] per PSRFITS spec
         for (size_t i = 0; i < nchan; ++i) 
@@ -770,21 +760,22 @@ bool PSRFITS_Writer::append_subint_search(double* data_double, const size_t nbin
 	size_t actually_read = 0;
 
 
+	size_t buf_pos = 0;
 	for (int row = 1; row < nsubint+1; ++row)
 	{
 
 		// Check how many time steps are available
-		actually_read = std::min(size_t(nsblk), nbin - nsblk*row);
-		actually_read = std::min(actually_read, nbin);
+		actually_read = std::min(size_t(nsblk), nstot - buf_pos);
 		
-		quantize(data_double + (row-1)*actually_read*nchan*npol, 
+		quantize(data_double + buf_pos*nchan*npol, 
 				actually_read, nchan, 
 				data_int.data(), nbits,
 				dat_scl.data(), dat_offs.data());
 
+		buf_pos += actually_read;
 
 		// TSUBINT and OFFS_SUB 
-		double tsubint = header->tau * actually_read * 1.0e-3; // Total subint duration
+		double tsubint = tau * actually_read * 1.0e-3; // Total subint duration
 		double offs_sub = (double(row) - 0.5) * tsubint; // Center of subint
 
 		fits_write_col(fptr, TDOUBLE, 1, row, 1, 1, &tsubint, &status);

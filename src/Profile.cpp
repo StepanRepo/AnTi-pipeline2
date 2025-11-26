@@ -14,19 +14,174 @@
 # define M_PI           3.14159265358979323846
 # define C           299792.458
 
+void calc_shift_int(int *shift, double DM, double fcomp, double fmin, double fmax, size_t nchann, double tau, double beta = 0.0)
+{
+
+	double *freqs = nullptr;
+	double *dt = nullptr;
+	double df = (fmax - fmin)  / nchann;
+
+	freqs = new double[nchann];
+	dt    = new double[nchann];
+
+	#pragma omp simd
+	for (size_t i = 0; i < nchann; ++i)
+		freqs[i] = (fmin + df * (static_cast<double>(i) + .5)) * (1.0 + beta);
+
+	#pragma omp simd
+	for (size_t i = 0; i < nchann; ++i)
+		dt[i] = 4.148808e6 * DM * (1.0/freqs[i]/freqs[i] - 1.0/fcomp/fcomp);
+
+	#pragma omp simd
+	for (size_t i = 0; i < nchann; ++i) 
+		shift[i] = static_cast<int> (dt[i] / tau + 0.5);
+
+	delete[] freqs;
+	delete[] dt;
+}
+
+void calc_shift_phase(fftw_complex *dphase, double DM, double fcomp, double fmin, double fmax, size_t nchann, double beta = 0.0)
+{
+	double *freqs = nullptr;
+	double df = (fmax - fmin)  / nchann;
+	double sign = fmin > fmax ? 1.0 : -1.0;
+	double phase, phase0;
+
+	freqs = new double[nchann];
+
+	#pragma omp simd
+	for (size_t i = 0; i < nchann; ++i)
+		freqs[i] = df * (static_cast<double>(i) + .5);
+
+	fcomp = (1+beta)*fcomp;
+	fmin  = (1+beta)*fmin;
+
+
+	phase0 = sign * 2.0e3 * M_PI * 4.148808e6 * DM * 
+		std::pow(fcomp-fmin, 2) /(fmin * fmin * fcomp);
+
+	#pragma omp simd
+	for (size_t i = 0; i < nchann; ++i)
+	{
+		phase = sign * 2.0e3 * M_PI * 4.148808e6 * DM * freqs[i] * freqs[i] /
+			(fmin * fmin * (fmin + freqs[i])) - phase0;
+
+		dphase[i][0] = std::cos(phase);
+		dphase[i][1] = std::sin(phase);
+	}
+
+	delete[] freqs;
+}
+
+void shift_window_incoherent(const double* in, double* out, const int* shift, const size_t nchann, const size_t obs_window, const double* mask = nullptr)
+{
+	for (size_t t = 0; t < obs_window; ++t) 
+	{
+		#pragma omp simd
+		for (size_t i = 0; i < nchann; ++i) 
+			out[t * nchann + i] = in[(t+shift[i])%obs_window  * nchann + i];
+
+		if (mask)
+		{
+			#pragma omp simd
+			for (size_t i = 0; i < nchann; ++i) 
+				out[t * nchann + i] *= mask[i];
+		}
+	}
+
+}
+
+
+void shift_window_coherent(fftw_plan fft, fftw_plan ifft, fftw_complex* f_space, fftw_complex* dphase, size_t nchann)
+{
+	double re, im;
+	fftw_execute(fft);
+
+	#pragma omp simd
+	for (size_t i = 0; i < nchann; ++i)
+	{
+		re = f_space[i][0];
+		im = f_space[i][1];
+
+		f_space[i][0] = re*dphase[i][0] - im*dphase[i][1];
+		f_space[i][1] = re*dphase[i][1] + im*dphase[i][0];
+	}
+
+	fftw_execute(ifft);
+}
+
+void detect(fftw_complex* t_space, double* sum, size_t nchann)
+{
+	double re, im;
+
+	#pragma omp simd
+	for (size_t i = 0; i < nchann; ++i)
+	{
+		re = t_space[i][0]/double(nchann);
+		im = t_space[i][1]/double(nchann);
+
+		sum[i] = re*re + im*im;
+	}
+}
+
+std::vector<size_t> matched_filter(const double* data, size_t N, double threshold)
+{
+    thread_local static std::vector<double> mask, edges;
+    if (mask.size() != N) mask.resize(N);
+    if (edges.size() != N) edges.resize(N);
+
+	std::vector<size_t> rises(0), falls(0); 
+
+	std::memcpy(mask.data(), data, N*sizeof(double));
+	math::subtract_baseline(mask.data(), N, 100);
+
+	for (size_t i = 0; i < N; ++i)
+		if (mask[i] < threshold) 
+			mask[i] = 0.0;
+		else
+			mask[i] = 1.0;
+
+	std::memcpy(edges.data(), mask.data(), N*sizeof(double));
+	for (size_t i = 0; i < N-1; ++i)
+		edges[i] = mask[i+1] - mask[i];
+	edges[N-1] = 0.0;
+
+	for (size_t i = 0; i < N; ++i)
+	{
+		if (edges[i] > 0.0) rises.push_back(i);
+		if (edges[i] < 0.0) falls.push_back(i);
+	}
+
+	if (rises.size() > falls.size())
+		rises.erase(rises.end());
+
+	if (rises.size() < falls.size())
+		falls.erase(falls.begin());
+
+	for (size_t i = 0; i < rises.size(); ++i)
+		rises[i] = (rises[i] + falls[i])/2.0;
+
+
+	return rises;
+}
+
+
+
+
 Profile::Profile(
 		const std::string& filename, 
 		const std::string& format, 
 		size_t buffer_size,
-		bool save_raw_in, bool save_dyn_in, bool save_sum_in)
+		bool save_raw_in, bool save_dyn_in, bool save_sum_in,
+		std::string output_dir_in)
 {
     if (format == "PRAO_adc") 
 	{
-        reader = std::make_unique<PRAO_adc>(filename, buffer_size);
+        reader = new PRAO_adc(filename, buffer_size);
     } 
 	else if (format == "IAA_vdif") 
 	{
-        reader = std::make_unique<IAA_vdif>(filename, buffer_size);
+        reader = new IAA_vdif(filename, buffer_size);
     }
    	else 
 	{
@@ -40,7 +195,6 @@ Profile::Profile(
 
 	raw = nullptr;
 	dyn = nullptr;
-	dync = nullptr;
 	sum = nullptr;
 	fr = nullptr;
 	mask = nullptr;
@@ -48,315 +202,236 @@ Profile::Profile(
 	save_raw = save_raw_in;
 	save_dyn = save_dyn_in;
 	save_sum = save_sum_in;
+	output_dir = output_dir_in;
+
+	hdr = reader->header_ptr;
 
 	redshift = 0.0;
 	sumidx = 0;
 }
 
-size_t Profile::fill_2d(double* dyn_spec, size_t time_steps, size_t freq_num) 
+size_t Profile::fill_2d(double* data, size_t& nchann, size_t& buf_pos, size_t& buf_max, size_t& buf_size) 
 {
 	if (!reader || !reader->is_open) 
         throw std::runtime_error("Reader not initialized or file not open");
 
-    return reader->fill_2d(dyn_spec, time_steps, freq_num);
+	size_t valid_samples = buf_max - buf_pos;
+	size_t bytes_to_copy = valid_samples * nchann * sizeof(double);
+	std::memmove(data, data + buf_pos * nchann, bytes_to_copy);
+
+	buf_pos = 0;
+	buf_max = valid_samples;
+
+	size_t filled = reader-> fill_2d(data + buf_max*nchann, buf_size - buf_max, nchann);
+
+	buf_max += filled;
+
+    return filled;
 }
 
-size_t Profile::fill_1d(fftw_complex *vec, size_t n) 
+size_t Profile::fill_1d(double* data, size_t& buf_pos, size_t& buf_max, size_t& buf_size) 
 {
     if (!reader || !reader->is_open) 
+	{
         throw std::runtime_error("Reader not initialized or file not open");
+	}
 
-    return reader->fill_1d(vec, n);
+	size_t valid_samples = buf_max - buf_pos;
+	size_t bytes_to_copy = valid_samples * sizeof(double);
+	std::memmove(data, data + buf_pos, bytes_to_copy);
+
+	buf_pos = 0;
+	buf_max = valid_samples;
+
+	size_t filled = reader->fill_1d(data + buf_max, buf_size - buf_max);
+	buf_max += filled;
+
+    return filled;
 }
 
-size_t Profile::fill_1d(double *vec, size_t n) 
+void Profile::check_incoherent(size_t nchann)
 {
-    if (!reader || !reader->is_open) 
-        throw std::runtime_error("Reader not initialized or file not open");
+	if (!reader || !reader->is_open) 
+	{
+		throw std::runtime_error("Reader not initialized or file not open");
+	}
 
-    return reader->fill_1d(vec, n);
+	if (hdr->nchann != nchann && hdr->nchann != 1)
+	{
+		throw std::runtime_error("File was recorded with different number of freqs");
+	}
+
+	if (hdr->fmin == 0.0 || hdr->fmax == 0.0)
+	{
+		throw std::runtime_error("Frequency information was not provided");
+	}
+
+	if (sum != nullptr)
+	{
+		throw std::runtime_error("The file already contains frequency averaged data");
+	}
+
+
+	if (hdr->nchann == 1)
+	{
+		hdr->nchann = nchann;
+		hdr-> tau = 2.0e-3 * nchann / hdr->sampling;
+	}
+	if (hdr->fcomp == 0.0)
+	{
+		hdr->fcomp = std::max(hdr->fmin, hdr->fmax);
+	}
+}
+
+void Profile::check_coherent()
+{
+	if (!reader || !reader->is_open) 
+	{
+		throw std::runtime_error("Reader not initialized or file not open");
+	}
+	if (hdr->fmin == 0.0 || hdr->fmax == 0.0)
+		throw std::runtime_error("Frequency information was not provided");
+	if (hdr->nchann != 1)
+		throw std::runtime_error("Coherent dedispersion is unavailable for this file");
+	if (sum != nullptr)
+		throw std::runtime_error("The file already contains frequency averaged data");
+
+	if (hdr->fcomp == 0.0)
+	{
+		hdr->fcomp = std::max(hdr->fmin, hdr->fmax);
+	}
+
+	if (hdr-> nchann == 1)
+		hdr-> tau = 2.0e-3 / hdr->sampling;
 }
 
 void Profile::dedisperse_incoherent(double DM, size_t nchann)
 {
-    if (!reader || !reader->is_open) 
-	{
-        throw std::runtime_error("Reader not initialized or file not open");
-	}
-
-	if (reader->header_ptr->nchann != nchann && reader->header_ptr->nchann != 1)
-        throw std::runtime_error("File was recorded with different number of freqs");
-
-	if (reader->header_ptr->nchann == 1)
-	{
-		reader->header_ptr->nchann = nchann;
-		reader->header_ptr-> tau = 
-			2.0e-3 * nchann / reader->header_ptr->sampling;
-	}
+	check_incoherent(nchann);
 
 	size_t obs_window;
 	double tau;
 
 	double fcomp, fmin, fmax;
-
-	double *freqs, *dt;
-
-	if (raw == nullptr)
-		throw std::runtime_error("There is no raw dynamic spectrum to de-disperce");
-	if (sum != nullptr)
-		throw std::runtime_error("The file already contains frequency averaged data");
-
-	fmin = reader->header_ptr->fmin;
-	fmax = reader->header_ptr->fmax;
-	fcomp = reader->header_ptr->fcomp;
-	tau = reader->header_ptr->tau;
-	nchann = reader->header_ptr->nchann;
-	obs_window = reader->header_ptr->obs_window;
-
-
-	if (fmin == 0.0 || fmax == 0.0)
-        throw std::runtime_error("Frequency information was not provided");
-	if (nchann != reader->header_ptr->nchann && reader->header_ptr->nchann != 1)
-        throw std::runtime_error("File was written with diffderent number of channels");
-	if (obs_window == 0)
-        throw std::runtime_error("Unknown observational window");
-
-	if (fcomp == 0.0)
-	{
-		fcomp = std::max(fmin, fmax);
-		reader->header_ptr->fcomp = fcomp;
-	}
-
-
-	freqs = new double[nchann];
-	dt = new double[nchann];
-	double df = (fmax - fmin)  / nchann;
-
-	#pragma omp simd
-	for (size_t i = 0; i < nchann; ++i)
-		freqs[i] = fmin + df * (static_cast<double>(i) + .5);
-
-	#pragma omp simd
-	for (size_t i = 0; i < nchann; ++i)
-		dt[i] = 4.148808e6 * DM * (1.0/freqs[i]/freqs[i] - 1.0/fcomp/fcomp);
-
-
-	try
-	{
-		dyn = new double[obs_window*nchann];
-		sum = new double[obs_window];
-	} 
-	catch (const std::bad_alloc& e) 
-	{
-		std::cerr << "Allocation failed for dynamic profile. Requested size: " << ((obs_window * nchann *sizeof(double)) / 1024/1024/1024) << " GiB." << std::endl;
-		std::cerr << e.what() << std::endl;
-			
-		delete[] dyn;
-		delete[] sum;
-		dyn = nullptr;
-		sum = nullptr;
-
-        throw; // Re-throw to signal failure
-    }
-
 	int *shift;
+
+	fmin = hdr->fmin;
+	fmax = hdr->fmax;
+	fcomp = hdr->fcomp;
+	tau = hdr->tau;
+	nchann = hdr->nchann;
+	obs_window = hdr->obs_window;
+
+
+
+
 	shift = new int[nchann];
-	for (size_t i = 0; i < nchann; ++i) 
-	{
-		shift[i] = static_cast<int> (dt[i] / tau + 0.5);
-	}
+	dyn = new double[obs_window*nchann];
+	sum = new double[obs_window];
 
-	for (size_t t = 0; t < obs_window; ++t) 
-	{
-		#pragma omp simd
-		for (size_t i = 0; i < nchann; ++i) 
-			dyn[t * nchann + i] = raw[(t+shift[i])%obs_window  * nchann + i];
 
-		if (mask)
-		{
-			#pragma omp simd
-			for (size_t i = 0; i < nchann; ++i) 
-				dyn[t * nchann + i] *= mask[i];
-		}
-	}
+	calc_shift_int(shift, DM, fcomp, fmin, fmax, nchann, tau, redshift);
+	shift_window_incoherent(raw, dyn, shift, nchann, obs_window, mask);
 
-	#pragma omp simd
+
 	for (size_t t = 0; t < obs_window; ++t) 
 		sum[t] = std::accumulate(dyn + t*nchann, dyn + (t+1)*nchann, 0.0);
+
+
+	
+	if (save_dyn)
+	{
+		PSRFITS_Writer writer(output_dir + "dyn_" + reader->filename);
+		writer.createPrimaryHDU("PSR", hdr);
+		writer.append_subint_fold(
+				dyn, nullptr, 
+				obs_window, nchann, 1, 
+				hdr->period, DM, fmin, fmax, tau);
+	}
+
+	if (save_sum)
+	{
+		PSRFITS_Writer writer(output_dir + "sum_" + reader->filename);
+		writer.createPrimaryHDU("PSR", hdr);
+		writer.append_subint_fold(
+				sum, nullptr, 
+				obs_window, 1, 1, 
+				hdr->period, DM, fmin, fmax, tau);
+	}
+
+	delete[] shift;
 }
 
 std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 {
-    if (!reader || !reader->is_open) 
-	{
-        throw std::runtime_error("Reader not initialized or file not open");
-	}
-
-	if (reader->header_ptr->nchann != nchann && reader->header_ptr->nchann != 1)
-        throw std::runtime_error("File was recorded with different number of freqs");
-
-	if (reader->header_ptr->nchann == 1)
-	{
-		reader->header_ptr->nchann = nchann;
-		reader->header_ptr-> tau = 
-			2.0e-3 * nchann / reader->header_ptr->sampling;
-	}
+	check_incoherent(nchann);
 
 
 	size_t obs_window;
 	double tau;
-
-	double fcomp, fmin, fmax;
-
-	double *freqs, *dt;
-
-	int *shift;
 	size_t n_DM;
-
-	double *pre = nullptr, *post = nullptr;
+	double fcomp, fmin, fmax;
 	size_t buf_pos, buf_max;
 
+	int *shift = nullptr;
+	double *pre = nullptr, *post = nullptr;
+
 	std::ofstream raw_output, dyn_output, sum_output;
-	//std::srand(time(NULL));
+	std::srand(time(NULL));
 	std::string id = "";
 	id += std::to_string(std::rand());
 	id += ".bin";
 
 	if (save_raw)
-		raw_output = std::ofstream("raw_" + id);
-
+		raw_output = std::ofstream(output_dir + "raw_" + id);
 	if (save_dyn)
-		dyn_output = std::ofstream("dyn_" + id);
-
+		dyn_output = std::ofstream(output_dir + "dyn_" + id);
 	if (save_sum)
-		sum_output = std::ofstream("sum_" + id);
+		sum_output = std::ofstream(output_dir + "sum_" + id);
 
-	if (sum != nullptr)
-		throw std::runtime_error("The file already contains frequency averaged data");
 
-	fmin = reader->header_ptr->fmin;
-	fmax = reader->header_ptr->fmax;
-	fcomp = reader->header_ptr->fcomp;
-	tau = reader->header_ptr->tau;
-
-	if (fmin == 0.0 || fmax == 0.0)
-        throw std::runtime_error("Frequency information was not provided");
-	if (fcomp == 0.0)
-	{
-		fcomp = std::max(fmin, fmax);
-		reader->header_ptr->fcomp = fcomp;
-	}
-
-	tau = reader->header_ptr->tau;
-
-	freqs = new double[nchann];
-	dt = new double[nchann];
-	shift = new int[nchann];
-	double df = (fmax - fmin)  / nchann;
-
-	#pragma omp simd
-	for (size_t i = 0; i < nchann; ++i)
-		freqs[i] = fmin + df * (static_cast<double>(i) + .5);
-
-	#pragma omp simd
-	for (size_t i = 0; i < nchann; ++i)
-		dt[i] = 4.148808e6 * DM * (1.0/freqs[i]/freqs[i] - 1.0/fcomp/fcomp);
-
-	#pragma omp simd
-	for (size_t i = 0; i < nchann; ++i)
-		shift[i] = static_cast<int> (dt[i] / tau + 0.5);
+	fmin = hdr->fmin;
+	fmax = hdr->fmax;
+	fcomp = hdr->fcomp;
+	tau = hdr->tau;
 
 
 	double dtmax = 4.15e6 * DM * std::abs(1/fmin/fmin - 1/fmax/fmax);
 	n_DM = static_cast<size_t>(dtmax / tau) + 1;
 	n_DM += n_DM % 2;
-	
+
 	// set 256 MiB buffer as standard size
 	obs_window = std::max(n_DM, (256ul << 20)/nchann/sizeof(double)); 
 	obs_window += n_DM;
 
-	try
-	{
-		pre = new double[obs_window*nchann];
-		post = new double[obs_window*nchann];
-		sum = new double[obs_window - n_DM];
-	} 
-	catch (const std::bad_alloc& e) 
-	{
-		std::cerr << "Allocation failed for dynamic profile. Requested size: " << ((obs_window * nchann *sizeof(double)) / 1024/1024/1024) << " GiB." << std::endl;
-		std::cerr << e.what() << std::endl;
-			
-		if (pre)
-		{
-			delete[] pre;
-			pre = nullptr;
-		}
 
-		if (post)
-		{
-			delete[] post;
-			post = nullptr;
-		}
+	shift = new int[nchann];
+	pre = new double[obs_window*nchann];
+	post = new double[obs_window*nchann];
+	sum = new double[obs_window - n_DM];
 
-		if (sum)
-		{
-			delete[] sum;
-			sum = nullptr;
-		}
-
-        throw; // Re-throw to signal failure
-    }
+	calc_shift_int(shift, DM, fcomp, fmin, fmax, nchann, tau, redshift);
 
 	buf_pos = 0;
 	buf_max = 0;
-
 	sumidx = 0;
 
 	while(true)
 	{
 		if (buf_pos + obs_window >= buf_max)
-		{
+			fill_2d(pre, nchann, buf_pos, buf_max, obs_window);
 
-			size_t valid_samples = buf_max - buf_pos;
-			size_t bytes_to_copy = valid_samples * nchann * sizeof(double);
-			std::memmove(pre, pre + buf_pos * nchann, bytes_to_copy);
+		if (buf_max < obs_window)
+			break; // EOF is reached
+	
+		shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
 
-			buf_pos = 0;
-			buf_max = valid_samples;
-
-			size_t filled = fill_2d(
-					pre + buf_max*nchann, 
-					obs_window - buf_max, nchann);
-
-
-			if (filled > 0)
-				buf_max += filled;
-			else
-				break; // EOF is reached
-
-			if (buf_max < obs_window)
-				break; // EOF is reached
-		}
-
-		for (size_t t = 0; t < obs_window; ++t) 
-		{
-			#pragma omp simd
-			for (size_t i = 0; i < nchann; ++i) 
-				post[t * nchann + i] = pre[(t+shift[i])  * nchann + i];
-
-			if (mask)
-			{
-				#pragma omp simd
-				for (size_t i = 0; i < nchann; ++i) 
-					post[t * nchann + i] *= mask[i];
-			}
-		}
 
 		for (size_t t = 0; t < obs_window - n_DM; ++t) 
 			sum[t] = std::accumulate(post + t*nchann, post + (t+1)*nchann, 0.0);
 
 		// save processed buffer
-		// regecting first and last n_DM/2 inputs
+		// regecting last n_DM inputs
 
 		if (save_raw)
 			raw_output.write(reinterpret_cast<const char*>(pre),
@@ -371,56 +446,73 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 					(buf_max - n_DM) * sizeof(double));
 
 		buf_pos = buf_max - n_DM;
-
 		sumidx += buf_pos;
+		std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
 	}
 
 	// zero padding to save the last part of the file
 	std::fill(pre + buf_max*nchann, pre + obs_window*nchann, 0.0);
-
-	// process last read buffer
-	for (size_t t = 0; t < obs_window - n_DM; ++t) 
-	{
-		// Write back
-		#pragma omp simd
-		for (size_t i = 0; i < nchann; ++i) 
-			post[t * nchann + i] = pre[(t+shift[i])  * nchann + i];
-
-		if (mask)
-		{
-#pragma omp simd
-			for (size_t i = 0; i < nchann; ++i) 
-				post[t * nchann + i] *= mask[i];
-		}
-	}
+	shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
 
 
 	for (size_t t = 0; t < obs_window - n_DM; ++t) 
 		sum[t] = std::accumulate(post + t*nchann, post + (t+1)*nchann, 0.0);
 
+	buf_pos = buf_max - n_DM;
+	sumidx += buf_pos;
+	std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
+
 
 	if (save_raw)
-	{
 		raw_output.write(reinterpret_cast<const char*>(pre),
 				nchann * (buf_max - n_DM) * sizeof(double));
+
+	if (save_dyn)
+		dyn_output.write(reinterpret_cast<const char*>(post),
+				nchann * (buf_max - n_DM) * sizeof(double));
+
+	if (save_sum)
+		sum_output.write(reinterpret_cast<const char*>(sum),
+				(buf_max - n_DM) * sizeof(double));
+
+
+
+	// Convert save buffers into readable psrfits files
+	if (save_raw)
+	{
 		raw_output.close();
+
+		PSRFITS_Writer writer(output_dir + "raw_" + reader->filename);
+		writer.createPrimaryHDU("SEARCH", hdr);
+		writer.append_subint_stream(
+				output_dir + "raw_" + id, mask, 
+				nchann, 1, 
+				DM, fmin, fmax, tau);
 	}
 
 	if (save_dyn)
 	{
-		dyn_output.write(reinterpret_cast<const char*>(post),
-				nchann * (buf_max - n_DM) * sizeof(double));
 		dyn_output.close();
+
+		PSRFITS_Writer writer(output_dir + "dyn_" + reader->filename);
+		writer.createPrimaryHDU("SEARCH", hdr);
+		writer.append_subint_stream(
+				output_dir + "dyn_" + id, nullptr, 
+				nchann, 1, 
+				DM, fmin, fmax, tau);
 	}
 
 	if (save_sum)
 	{
-		sum_output.write(reinterpret_cast<const char*>(sum),
-				(buf_max - n_DM) * sizeof(double));
 		sum_output.close();
-	}
 
-	std::cout << "last step" << std:: endl;
+		PSRFITS_Writer writer(output_dir + "sum_" + reader->filename);
+		writer.createPrimaryHDU("SEARCH", hdr);
+		writer.append_subint_stream(
+				output_dir + "sum_" + id, nullptr, 
+				1, 1, 
+				DM, fmin, fmax, tau);
+	}
 
 	delete[] pre;
 	pre = nullptr;
@@ -428,43 +520,174 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 	post = nullptr;
 	delete[] sum;
 	sum = nullptr;
-	delete[] freqs;
-	freqs = nullptr;
-	delete[] dt;
-	dt = nullptr;
 	delete[] shift;
 	shift = nullptr;
 
 	return id;
 }
+
+std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann)
+{
+
+	check_incoherent(nchann);
+
+	size_t obs_window;
+	double tau;
+	size_t n_DM;
+	double fcomp, fmin, fmax;
+	size_t buf_pos, buf_max;
+
+	std::ofstream info(output_dir + "info.csv");
+
+	int *shift = nullptr;
+	double *pre = nullptr, *post = nullptr;
+	double *sum_dm0 = nullptr, *sum_dm1 = nullptr;
+
+	fmin = hdr->fmin;
+	fmax = hdr->fmax;
+	fcomp = hdr->fcomp;
+	tau = hdr->tau;
+
+
+	double dtmax = 4.15e6 * DM * std::abs(1/fmin/fmin - 1/fmax/fmax);
+	n_DM = static_cast<size_t>(dtmax / tau) + 1;
+	n_DM += n_DM % 2;
+
+	// set 256 MiB buffer as standard size
+	obs_window = std::max(n_DM, (256ul << 20)/nchann/sizeof(double)); 
+	obs_window += n_DM;
+
+	shift = new int[nchann];
+	pre = new double[obs_window*nchann];
+	post = new double[obs_window*nchann];
+	sum_dm1 = new double[obs_window - n_DM];
+	sum_dm0 = new double[obs_window - n_DM];
+
+	calc_shift_int(shift, DM, fcomp, fmin, fmax, nchann, tau, redshift);
+
+	buf_pos = 0;
+	buf_max = 0;
+	sumidx = 0;
+
+	while(true)
+	{
+
+		if (buf_pos + obs_window >= buf_max)
+			fill_2d(pre, nchann, buf_pos, buf_max, obs_window);
+
+		if (buf_max < obs_window)
+			break; // EOF is reached
+
+		std::cout << "You should not see this text" << std::endl;
+		// save processed buffer
+		// regecting last n_DM inputs
+		//  dyn_output.write(reinterpret_cast<const char*>(post),
+		//			nchann * (buf_max - n_DM) * sizeof(double));
+
+
+		buf_pos = buf_max - n_DM;
+		sumidx += buf_pos;
+		std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
+	}
+
+	size_t N = buf_max - n_DM;
+	// zero padding to save the last part of the file
+	std::fill(pre + buf_max*nchann, pre + obs_window*nchann, 0.0);
+	shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
+
+
+	for (size_t t = 0; t < N; ++t) 
+		sum_dm0[t] = std::accumulate(pre + t*nchann, pre + (t+1)*nchann, 0.0) / double(nchann);
+
+	for (size_t t = 0; t < N; ++t) 
+		sum_dm1[t] = std::accumulate(post + t*nchann, post + (t+1)*nchann, 0.0) / double(nchann);
+
+	std::vector<size_t> pulses_dm0, pulses_dm1;
+	pulses_dm0 = matched_filter(sum_dm0, N, 5.0);
+	pulses_dm1 = matched_filter(sum_dm1, N, 5.0);
+
+	for (auto it = pulses_dm1.begin(); it != pulses_dm1.end(); ++it) 
+		std::cout << *it << std::endl;
+
+	bool is_pulse = true;
+
+	if (save_raw && is_pulse) 
+	{
+		PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename);
+		writer1.createPrimaryHDU("SEARCH", hdr);
+		writer1.append_subint_search(
+				pre, nullptr,
+				buf_max - n_DM, nchann, 1, 
+				DM, fmin, fmax, tau);
+	}
+
+	if (save_dyn && is_pulse) 
+	{
+		PSRFITS_Writer writer1(output_dir + "dyn_" + reader->filename);
+		writer1.createPrimaryHDU("SEARCH", hdr);
+		writer1.append_subint_search(
+				post, nullptr,
+				buf_max - n_DM, nchann, 1, 
+				DM, fmin, fmax, tau);
+	}
+
+	if (save_sum && is_pulse) 
+	{
+		std::ofstream test(output_dir + "test0.bin");
+		test.write((char*) sum_dm0, (buf_max - n_DM) * sizeof(double));
+		test.close();
+
+		test.open(output_dir + "test1.bin");
+		test.write((char*) sum_dm1, (buf_max - n_DM) * sizeof(double));
+		test.close();
+
+
+
+		PSRFITS_Writer writer0(output_dir + "sum0_" + reader->filename);
+		writer0.createPrimaryHDU("SEARCH", hdr);
+		writer0.append_subint_search(
+				sum_dm0, nullptr,
+				buf_max - n_DM, 1, 1, 
+				0, fmin, fmax, tau);
+
+		PSRFITS_Writer writer1(output_dir + "sum1_" + reader->filename);
+		writer1.createPrimaryHDU("SEARCH", hdr);
+		writer1.append_subint_search(
+				sum_dm1, nullptr,
+				buf_max - n_DM, 1, 1, 
+				DM, fmin, fmax, tau);
+	}
+
+	buf_pos = buf_max - n_DM;
+	sumidx += buf_pos;
+	std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
+
+	return "";
+}
+
+
 void Profile::dedisperse_coherent(double DM, size_t nchann)
 {
-return;
+		throw std::runtime_error("The function development is in progress");
+		return;
 }
 
 std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 {
-	if (!reader || !reader->is_open) 
-	{
-		throw std::runtime_error("Reader not initialized or file not open");
-	}
+	check_coherent();
 
 	std::ofstream raw_output, dyn_output, sum_output;
 
+	double *buff;
 	size_t n_DM, obs_window;
 	size_t buf_pos, buf_max;
 
 	double fcomp, fmin, fmax;
 	double tau;
 
-	double *freqs;
 	fftw_complex* dphase;
-	double re, im;
-
-	double *buff;
 	fftw_complex *f_space, *t_space;
 	fftw_plan fft, ifft;
-	
 
 
 	/******************************************
@@ -481,68 +704,23 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	//spec = (double*)(fftw_malloc(sizeof(double) * (freq_num)));
 	//p  = fftw_plan_dft_1d(freq_num, t_small, f_small, FFTW_FORWARD, FFTW_ESTIMATE);
 
-
-	fmin = reader->header_ptr->fmin;
-	fmax = reader->header_ptr->fmax;
-	fcomp = reader->header_ptr->fcomp;
-
-	if (fmin == 0.0 || fmax == 0.0)
-        throw std::runtime_error("Frequency information was not provided");
-	if (reader->header_ptr->nchann != 1)
-        throw std::runtime_error("Coherent dedispersion is unavailable for this file");
-	if (sum != nullptr)
-		throw std::runtime_error("The file already contains frequency averaged data");
-
-	if (fcomp == 0.0)
-	{
-		fcomp = std::max(fmin, fmax);
-		reader->header_ptr->fcomp = fcomp;
-	}
-
-
-	if (reader->header_ptr-> nchann == 1)
-		reader->header_ptr-> tau = 
-			2.0e-3 / reader->header_ptr->sampling;
-
-	tau = reader->header_ptr->tau;
-
-	freqs  = (double*)(fftw_malloc(sizeof(double) * (nchann+1)));
-	dphase = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann+1)));
-
-	double df = (fmax - fmin) / nchann;
-	double phase = 0.0, phase0 = 0.0;
-	double sign = fmin > fmax ? 1.0 : -1.0;
-
-
-	#pragma omp simd
-	for (size_t i = 0; i < nchann+1; ++i)
-		freqs[i] = df * (static_cast<double>(i) + .5);
-
-
-	phase0 = sign * 2.0e3 * M_PI * 4.148808e6 * DM * 
-		std::pow(fcomp-fmin, 2) /(fmin * fmin * fcomp);
-
-	#pragma omp simd
-	for (size_t i = 0; i < nchann+1; ++i)
-	{
-		phase = sign * 2.0e3 * M_PI * 4.148808e6 * DM * freqs[i] * freqs[i] /
-			(fmin * fmin * (fmin + freqs[i])) - phase0;
-
-		dphase[i][0] = std::cos(phase);
-		dphase[i][1] = std::sin(phase);
-	}
-
+	fmin = hdr->fmin;
+	fmax = hdr->fmax;
+	fcomp = hdr->fcomp;
+	tau = hdr->tau;
 
 
 	double dtmax = 4.15e6 * DM * (std::pow(std::min(fmax, fmin), -2) - std::pow(std::max(fmax, fmin), -2));
 	n_DM = static_cast<size_t>(dtmax/tau);
 	n_DM += n_DM % 2;
-	//n_DM *= 2;
-
+	
 	if (nchann <= n_DM)
         throw std::runtime_error("The number of channels is too small for coherent dedispersion. Set at least 2^" + std::to_string(size_t(std::log2(n_DM)) + 1));
-
 	obs_window = 2*nchann;
+
+
+	dphase = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann)));
+	calc_shift_phase(dphase, DM, fcomp, fmin, fmax, nchann, redshift);
 
 
 	buff    = (double*) (fftw_malloc(sizeof(double) * obs_window));
@@ -551,7 +729,7 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	f_space = (fftw_complex*) (fftw_malloc(sizeof(fftw_complex) * (nchann+1)));
 
 	fft  = fftw_plan_dft_r2c_1d(obs_window, buff, f_space, FFTW_ESTIMATE);
-	ifft = fftw_plan_dft_1d(nchann, f_space, t_space, FFTW_BACKWARD, FFTW_ESTIMATE);
+	ifft = fftw_plan_dft_1d(nchann, f_space+1, t_space, FFTW_BACKWARD, FFTW_ESTIMATE);
 
 
 	//std::srand(time(NULL));
@@ -560,65 +738,30 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	id += ".bin";
 
 	if (save_raw)
-		raw_output = std::ofstream("raw_" + id);
+		raw_output = std::ofstream(output_dir + "raw_" + id);
 
 	if (save_dyn)
-		dyn_output = std::ofstream("dyn_" + id);
+		dyn_output = std::ofstream(output_dir + "dyn_" + id);
 
 	if (save_sum)
-		sum_output = std::ofstream("sum_" + id);
+		sum_output = std::ofstream(output_dir + "sum_" + id);
 
 	std::fill(buff, buff + 2*n_DM, 0.0);
 	buf_max = 2*n_DM; 
 	buf_pos = 0;
+	sumidx = 0;
 
 	while(true)
 	{
 		if (buf_pos + obs_window >= buf_max)
-		{
+			fill_1d(buff, buf_pos, buf_max, obs_window);
 
-			size_t valid_samples = buf_max - buf_pos;
-			size_t bytes_to_copy = valid_samples * sizeof(double);
-			std::memmove(buff, buff + buf_pos, bytes_to_copy);
+		if (buf_max < obs_window)
+			break; // EOF is reached
 
-			buf_pos = 0;
-			buf_max = valid_samples;
+		shift_window_coherent(fft, ifft, f_space+1, dphase, nchann);
+		detect(t_space, sum, nchann);
 
-			size_t filled = fill_1d(buff + buf_max, obs_window - buf_max);
-
-			if (filled > 0)
-				buf_max += filled;
-			else
-				break; // EOF is reached
-
-			if (buf_max < obs_window)
-				break; // EOF is reached
-		}
-
-		std::cout << "step" << std::endl;
-
-		fftw_execute(fft);
-
-#pragma omp simd
-		for (size_t i = 0; i < nchann+1; ++i)
-		{
-			re = f_space[i][0];
-			im = f_space[i][1];
-
-			f_space[i][0] = re*dphase[i][0] - im*dphase[i][1];
-			f_space[i][1] = re*dphase[i][1] + im*dphase[i][0];
-		}
-
-		fftw_execute(ifft);
-
-		#pragma omp simd
-		for (size_t i = 0; i < nchann; ++i)
-		{
-			re = t_space[i][0]/double(obs_window);
-			im = t_space[i][1]/double(obs_window);
-
-			sum[i] = re*re + im*im;
-		}
 
 		if (save_raw)
 			raw_output.write(reinterpret_cast<const char*>(buff + 2*n_DM),
@@ -633,6 +776,8 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 					(nchann - n_DM) * sizeof(double));
 
 		buf_pos = obs_window - 2*n_DM;
+		sumidx += buf_pos/2;
+		std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
 
 		/******************************************
 		 * This part allows to plot output spectrum
@@ -667,30 +812,12 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	}
 	std::fill(buff + buf_max, buff + obs_window, 0.0);
 
-	std::cout << "last step" << std::endl;
+	shift_window_coherent(fft, ifft, f_space+1, dphase, nchann);
+	detect(t_space, sum, nchann);
 
-	fftw_execute(fft);
-
-#pragma omp simd
-	for (size_t i = 0; i < nchann+1; ++i)
-	{
-		re = f_space[i][0];
-		im = f_space[i][1];
-
-		f_space[i][0] = re*dphase[i][0] - im*dphase[i][1];
-		f_space[i][1] = re*dphase[i][1] + im*dphase[i][0];
-	}
-
-	fftw_execute(ifft);
-
-#pragma omp simd
-	for (size_t i = 0; i < nchann; ++i)
-	{
-		re = t_space[i][0]/double(obs_window);
-		im = t_space[i][1]/double(obs_window);
-
-		sum[i] = re*re + im*im;
-	}
+	buf_pos = buf_max - 2*n_DM;
+	sumidx += buf_pos/2;
+	std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
 
 	if (save_raw)
 		raw_output.write(reinterpret_cast<const char*>(buff + 2*n_DM),
@@ -704,13 +831,48 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 		sum_output.write(reinterpret_cast<const char*>(sum + n_DM),
 				(buf_max/2 - n_DM) * sizeof(double));
 
-	raw_output.close();
-	dyn_output.close();
-	sum_output.close();
+
+	if (save_raw)
+	{
+		raw_output.close();
+
+		PSRFITS_Writer writer(output_dir + "raw_" + reader->filename);
+		writer.createPrimaryHDU("SEARCH", hdr);
+		writer.append_subint_stream(
+				output_dir + "raw_" + id, nullptr, 
+				1, 1, 
+				DM, fmin, fmax, tau/2.0);
+	}
+
+	if (save_dyn)
+	{
+		dyn_output.close();
+
+		PSRFITS_Writer writer(output_dir + "dyn_" + reader->filename);
+		writer.createPrimaryHDU("SEARCH", hdr);
+		writer.append_subint_stream(
+				output_dir + "dyn_" + id, nullptr, 
+				2, 1, 
+				DM, fmin, fmax, tau, true);
+	}
+
+	if (save_sum)
+	{
+		sum_output.close();
+
+		PSRFITS_Writer writer(output_dir + "sum_" + reader->filename);
+		writer.createPrimaryHDU("SEARCH", hdr);
+		writer.append_subint_stream(
+				output_dir + "sum_" + id, nullptr, 
+				1, 1, 
+				DM, fmin, fmax, tau);
+	}
+
 	fftw_destroy_plan(fft);
 	fftw_destroy_plan(ifft);
 	fftw_free(buff);
 	fftw_free(sum);
+	fftw_free(dphase);
 	fftw_free(f_space);
 	fftw_free(t_space);
 
@@ -727,7 +889,7 @@ void Profile::fold_dyn(double P, size_t nchann)
 	double tau;
 
 	double *buff = nullptr, *buff_curr = nullptr;
-	size_t buf_pos, buf_max;
+	size_t buf_pos, buf_max, buf_size;
 
 	// vars for time correction
 	size_t rev = 0;
@@ -735,44 +897,30 @@ void Profile::fold_dyn(double P, size_t nchann)
 	double diff;
 
 
-	if (reader->header_ptr->nchann == 1)
+	if (hdr->nchann == 1)
 	{
-		reader->header_ptr-> tau = 
-			2.0e-3 * nchann / reader->header_ptr->sampling;
-		reader->header_ptr-> nchann = nchann; 
+		hdr-> tau = 
+			2.0e-3 * nchann / hdr->sampling;
+		hdr-> nchann = nchann; 
 	}
 	else
 	{
 		throw std::runtime_error("Profile was recorded with different number of frequency channels");
 	}
 
-	tau = reader->header_ptr->tau;
+	tau = hdr->tau;
 	obs_window = size_t(P*1e3 / tau);
+	buf_size = 2*obs_window;
 
-	reader->header_ptr->obs_window = obs_window;
 
-	if (obs_window * reader->header_ptr->tau > P*1e3)
+	hdr->obs_window = obs_window;
+
+	if (obs_window * hdr->tau > P*1e3)
 		throw std::runtime_error("Observational window must be less than period!");
 
 
-	try
-	{
-		raw = new double [obs_window*nchann];
-		buff = new double [2 * obs_window * nchann];
-	} 
-	catch (const std::bad_alloc& e) 
-	{
-		std::cerr << "Allocation failed for raw dynamic profile. Requested size: " << ((obs_window * nchann *sizeof(double)) / 1024/1024/1024) << " GiB." << std::endl;
-		std::cerr << e.what() << std::endl;
-			
-		delete[] raw;
-		delete[] buff;
-
-		raw = nullptr;
-		buff = nullptr;
-
-        throw; // Re-throw to signal failure
-    }
+	raw = new double [obs_window*nchann];
+	buff = new double [buf_size * nchann];
 
 	std::fill(raw, raw + obs_window*nchann, 0.0);
 
@@ -783,29 +931,11 @@ void Profile::fold_dyn(double P, size_t nchann)
 	while(true)
 	{
 		if (buf_pos + obs_window >= buf_max)
-		{
+			fill_2d(buff, nchann, buf_pos, buf_max, buf_size);
 
-			size_t valid_samples = buf_max - buf_pos;
-			size_t bytes_to_copy = valid_samples * nchann * sizeof(double);
-			std::memmove(buff, buff + buf_pos * nchann, bytes_to_copy);
-
-			buf_pos = 0;
-			buf_max = valid_samples;
-
-			size_t filled = fill_2d(
-					buff + buf_max*nchann, 
-					2*obs_window - buf_max, nchann);
-
-			if (filled > 0)
-				buf_max += filled;
-			else
-				break; // EOF is reached
-
-
-			if (buf_pos + obs_window >= buf_max)
-				break; // EOF is reached
+		if (buf_pos + obs_window >= buf_max)
+			break; // EOF is reached
 			
-		}
 
 
 		buff_curr = buff + buf_pos * nchann;
@@ -824,11 +954,24 @@ void Profile::fold_dyn(double P, size_t nchann)
 	}
 	std::cout << std::endl;
 
-	reader->header_ptr->total_pulses = rev;
+	hdr->total_pulses = rev;
 
 	#pragma omp simd
 	for(size_t i = 0; i < obs_window*nchann; ++i)
 		raw[i] = raw[i] / double(rev);
+
+	if (save_raw)
+	{
+		PSRFITS_Writer writer(output_dir + "raw_" + reader->filename);
+		writer.createPrimaryHDU("PSR", hdr);
+		writer.append_subint_fold(
+				raw, mask, 
+				obs_window, nchann, 1, 
+				hdr->period, 0.0, hdr->fmin, hdr->fmax, tau);
+	}
+
+	delete[] buff;
+	buff = nullptr;
 }	
 
 void Profile::fold_dyn(std::string pred_file, size_t nchann)
@@ -848,9 +991,9 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 	if (T2Predictor_Read(pred, pred_file_c) != 0)
         throw std::runtime_error("Prediction file can not be loaded");
 
-	if (reader->header_ptr->t0 < T2Predictor_GetStartMJD(pred) ||
-			reader->header_ptr->t0 > T2Predictor_GetEndMJD(pred))
-        throw std::runtime_error("Date of observation is out of range of predictor dates");
+	if (hdr->t0 < T2Predictor_GetStartMJD(pred) ||
+			hdr->t0 > T2Predictor_GetEndMJD(pred))
+        throw std::runtime_error("Date of observation is out of range of predictor dates: " + std::to_string(hdr->t0) + " vs (" + std::to_string(T2Predictor_GetStartMJD(pred)) + ", " + std::to_string(T2Predictor_GetEndMJD(pred)) + ")");
 
 	std::cout << "Integrating pulse using prediction file for " << 
     T2Predictor_GetSiteName(pred) << " telescope" << std::endl;
@@ -862,7 +1005,7 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 	long double phase, t0, phase0;
 
 	double *buff = nullptr, *buff_curr = nullptr;
-	size_t buf_pos, buf_max;
+	size_t buf_pos, buf_max, buf_size;
 
 	// vars for time correction
 	size_t rev = 0;
@@ -872,21 +1015,21 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 	// vars for frequency correction
 	double fmin, fmax, fcomp;
 
-	fmin = reader->header_ptr->fmin;
-	fmax = reader->header_ptr->fmax;
-	fcomp = reader->header_ptr->fcomp;
+	fmin = hdr->fmin;
+	fmax = hdr->fmax;
+	fcomp = hdr->fcomp;
 
 	if (fcomp == 0.0)
 	{
 		fcomp = std::max(fmin, fmax);
-		reader->header_ptr->fcomp = fcomp;
+		hdr->fcomp = fcomp;
 	}
 
-	if (reader->header_ptr->nchann == 1)
+	if (hdr->nchann == 1)
 	{
-		reader->header_ptr-> tau = 
-			2.0e-3 * nchann / reader->header_ptr->sampling;
-		reader->header_ptr-> nchann = nchann; 
+		hdr-> tau = 
+			2.0e-3 * nchann / hdr->sampling;
+		hdr-> nchann = nchann; 
 	}
 	else
 	{
@@ -896,12 +1039,13 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 
 
 	// Make obsservational window corresponding to the initial period value
-	t0 = reader->header_ptr->t0;
+	t0 = hdr->t0;
 	phase0 = fmodl(T2Predictor_GetPhase(pred, t0, fcomp), 1.0L);
 	P = 1.0 / T2Predictor_GetFrequency(pred, t0, fcomp);
-	tau = reader->header_ptr->tau;
+	tau = hdr->tau;
 	obs_window = size_t(P*1e3 / tau);
-	reader->header_ptr->obs_window = obs_window;
+	hdr->obs_window = obs_window;
+	buf_size = 2*obs_window;
 
 
 
@@ -909,24 +1053,8 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 		throw std::runtime_error("Observational window must be less than period!");
 
 
-	try
-	{
-		raw = new double [obs_window*nchann];
-		buff = new double [2 * obs_window * nchann];
-	} 
-	catch (const std::bad_alloc& e) 
-	{
-		std::cerr << "Allocation failed for raw dynamic profile. Requested size: " << ((obs_window * nchann *sizeof(double)) / 1024/1024/1024) << " GiB." << std::endl;
-		std::cerr << e.what() << std::endl;
-			
-		delete[] raw;
-		delete[] buff;
-
-		raw = nullptr;
-		buff = nullptr;
-
-        throw; // Re-throw to signal failure
-    }
+	raw = new double [obs_window*nchann];
+	buff = new double [buf_size * nchann];
 
 	std::fill(raw, raw + obs_window*nchann, 0.0);
 
@@ -937,29 +1065,12 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 	while(true)
 	{
 		if (buf_pos + obs_window >= buf_max)
-		{
-
-			size_t valid_samples = buf_max - buf_pos;
-			size_t bytes_to_copy = valid_samples * nchann * sizeof(double);
-			std::memmove(buff, buff + buf_pos * nchann, bytes_to_copy);
-
-			buf_pos = 0;
-			buf_max = valid_samples;
-
-			size_t filled = fill_2d(
-					buff + buf_max*nchann, 
-					2*obs_window - buf_max, nchann);
-
-			if (filled > 0)
-				buf_max += filled;
-			else
-				break; // EOF is reached
+			fill_2d(buff, nchann, buf_pos, buf_max, buf_size); 
 
 
-			if (buf_pos + obs_window >= buf_max)
-				break; // EOF is reached
+		if (buf_pos + obs_window >= buf_max)
+			break; // EOF is reached
 			
-		}
 
 
 		buff_curr = buff + buf_pos * nchann;
@@ -988,11 +1099,21 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 	}
 	std::cout<<std::endl;
 
-	reader->header_ptr->total_pulses = rev;
+	hdr->total_pulses = rev;
 
 	#pragma omp simd
 	for(size_t i = 0; i < obs_window*nchann; ++i)
 		raw[i] = raw[i] / double(rev);
+
+	if (save_raw)
+	{
+		PSRFITS_Writer writer(output_dir + "raw_" + reader->filename);
+		writer.createPrimaryHDU("PSR", hdr);
+		writer.append_subint_fold(
+				raw, mask, 
+				obs_window, nchann, 1, 
+				hdr->period, 0.0, hdr->fmin, hdr->fmax, tau);
+	}
 
 	delete[] buff;
 	buff = nullptr;
@@ -1015,7 +1136,7 @@ double Profile::get_redshift (std::string par_path, std::string site)
 
     // Set site arrival time and observatory
 	const char* obs_code = site.c_str();
-    obs->sat = reader->header_ptr->t0;
+    obs->sat = hdr->t0;
     strcpy(obs->telID, obs_code);
 
 	psr.t2cMethod = T2C_TEMPO;
@@ -1046,10 +1167,10 @@ double Profile::get_redshift (std::string par_path, std::string site)
 	return redshift;
 }
 
-void Profile::create_mask(size_t nchann, double sig_threshold, double tail_threshold)
+void Profile::create_mask(size_t nchann, double sig_threshold, double tail_threshold, size_t max_len)
 {
 
-	if (reader->header_ptr->nchann != nchann && reader->header_ptr->nchann != 1)
+	if (hdr->nchann != nchann && hdr->nchann != 1)
         throw std::runtime_error("The signal was obtained with different number of freq channels");
 
 	std::cout << "Creating mask" << std::endl;
@@ -1073,16 +1194,28 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 	std::streampos current = reader->file.tellg();
 	reader->reset();
 
-	size_t filled;
+	size_t filled = 0;
+	size_t buf_pos = 0; 
+	size_t buf_max = 0;
+	size_t counter = 0;
+
 	std::fill(fr, fr + nchann, 0.0);
 	while(true)
 	{
-		filled = fill_2d(buff, obs_window, nchann);
+		filled = fill_2d(buff, nchann, buf_pos, buf_max, obs_window);
 
 		if (filled == 0) break; // EOF is reached
 
 		for (size_t i = 0; i < filled; ++i)
+		{
 			math::vec_add(fr, buff + i*nchann, nchann);
+			counter += 1;
+
+			if (counter > max_len && max_len > 0) break;
+		}
+
+		buf_pos += filled;
+		if (counter > max_len && max_len > 0) break;
 	}
 
 	// log the bandpass to stabilize the algotithm
@@ -1134,5 +1267,5 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 
 BaseHeader* Profile::getHeader()
 {
-    return reader ? reader->header_ptr : nullptr;
+    return reader ? hdr : nullptr;
 }

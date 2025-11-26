@@ -23,26 +23,27 @@ def bin_time(data, bin_size):
 
 if __name__ == "__main__":
     
-    path = Path(".")
+    path = Path("data")
+    plt.figure()
 
     for filename in path.glob("*.bin"):
         print(f"Processing {filename.stem}")
-        binning = 2**8
+        binning = 2**0
         tau = 9.765625e-7*binning*2
         #tau = 0.000200089*binning*2
         print(f"{tau*1e-3:} s")
 
 
         data = np.fromfile(filename, dtype=np.float64)
+        print(data.shape)
         data = bin_time(data, binning)
 
         t = np.arange(len(data)) * tau
 
-        plt.figure()
         plt.title(f"{filename.stem} $\\tau = $ {tau*1e6:.3f} ns")
         plt.plot(t, data)
         plt.xlabel("t, ms")
-        #plt.ylim(1.850, 1.950)
+        #plt.xlim(.0174, .0178)
 
 #        P = 0.71446991958999994665
 #        obs_window = int(P*1e3 / tau);
@@ -70,4 +71,4 @@ if __name__ == "__main__":
 #        plt.plot(t[:obs_window], int_prf)
 #        #plt.ylim(1.850, 1.950)
 
-    save_image("123.pdf")
+    save_image("plot.pdf")

@@ -1,52 +1,52 @@
 general:
-  mode: "dedisperse"
+  mode: "search"
   input_dir: "data"
   output_dir: "data"
-  #parfile: "0329.par"
+  parfile: "0329.par"
   site: "PO"
   verbose: 1
-  buf_size: 2
+  buf_size: 10
 
-  t0: 5.0
-  t1: 7.0
+  #t0: 17.5
+  #t1: 20.0
   
-  save_raw: true
+  save_raw: false
   save_dyn: false
-  save_sum: false
+  save_sum: true
 
 
 
 options:
 
-  # "dedisperce" options
   ddtype: "incoherent"
 
-  fold: false
   #t2pred: "t2pred.dat"
 
   #nchann: 33554432
-  nchann: 512
+  nchann: 2048
+  #nchann: 512
   mask: ""              # External file containing mask. Has higher priority than the filtration
-  filter: true  
-  tail_threshold: .7    
-  std_threshold: 3      
+  filter: true
+  tail_threshold: .5    
+  std_threshold: 3.0
+  max_len: 0
 
   
 # Owerwrite files' headers
 advanced:
-  #sampling: 1024.0
+  sampling: 1024.0
   #dm: 26.776
   #fmin: 1772.0
   #fmax: 1260.0
-  #fmin: 2675.8
-  #fmax: 2163.8
-  #dm: 56.7712
+  fmin: 2675.8
+  fmax: 2163.8
+  dm: 56.7712
 
 files:
-  # - Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif 
+   - Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif 
 #  - wideband_1024_2048.vdif
 #  - rup106_bd_321-1252_ch07.vdif
-  - 010818_0329+54_00adc
+#  - 010818_0329+54_00adc
 #  - 020818_0329+54_00adc
 #  - 011022_1133+16_00adc
 #  - 011222_1133+16_00adc

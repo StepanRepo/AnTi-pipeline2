@@ -2,6 +2,7 @@
 #include <Eigen/Core>
 #include <unsupported/Eigen/CXX11/Tensor>
 #include <cmath> // for sqrt, abs
+#include <iostream>
 
 namespace math 
 {
@@ -45,6 +46,16 @@ namespace math
 		return ConstMapType(a, n).mean();
 	}
 
+	double median(double* a, size_t n) 
+	{
+		std::sort(a, a+n);
+
+		if (n % 2 != 0) 
+			return a[n / 2];
+		else
+			return (a[(n - 1) / 2] + a[n / 2]) / 2.0;
+	}
+
 	double var(double *a, size_t n, double ddof) 
 	{
 		if (n <= ddof) return 0.0;
@@ -57,11 +68,17 @@ namespace math
 		return sq_sum / (n - ddof);
 	}
 
-	void sigmaclip(double* a, bool* mask, size_t n, double threshold)
+	void sigmaclip(double* a, bool* mask_in, size_t n, double threshold, double* mu, double* sigma)
 	{
 		if (n == 0) return;
+		bool* mask = nullptr;
 
 		// Initial pass: mark all as valid
+		if (!mask_in)
+			mask = new bool[n];
+		else
+			mask = mask_in;
+
 		std::fill(mask, mask + n, true);
 		size_t valid_count = n;
 
@@ -114,10 +131,64 @@ namespace math
 				}
 			}
 
+			if (sigma)
+				sigma[0] = stddev; 
+			if (mu)
+				mu[0] = m; 
+
 			// Stop if no points were clipped or only 1 point remains
 			if (!clipped || valid_count <= 1) break;
 		}
+
+		if (!mask_in)
+			delete[] mask;
 	}
+
+	// ------------------------------------------------------------
+	// 3. Time-domain profile processing
+	// ------------------------------------------------------------
+	void subtract_baseline(double *data, size_t n, size_t window_size) 
+	{
+		if (n == 0 || window_size == 0 || window_size > n) return;
+		bool *mask = nullptr;
+		double *window = nullptr;
+
+		mask = new bool[window_size];
+		window = new double[window_size];
+
+		double mu, std, med;
+
+
+		for (size_t i = 0; i < n-window_size; ++i) 
+		{
+			std::memcpy(window, data+i, window_size*sizeof(double));
+
+			med = median(window, window_size);
+			sigmaclip(window, mask, window_size, 3.0, &mu, &std);
+
+			if (std == 0.0) std = 1.0; // Avoid division by zero
+
+			// Apply normalization: (x - median) / std
+			data[i] = (data[i] - med) / std;
+		}
+
+		for (size_t i = n-window_size; i < n; ++i) 
+		{
+			std::memcpy(window, data+i, (n-i)*sizeof(double));
+			med = median(window, n-i);
+			sigmaclip(window, mask, n-i, 3.0, &mu, &std);
+
+			if (std == 0.0) std = 1.0; // Avoid division by zero
+
+			// Apply normalization: (x - median) / std
+			data[i] = (data[i] - med) / std;
+		}
+
+
+		delete[] mask;
+		delete[] window;
+	}
+
 
 
 	// ------------------------------------------------------------
