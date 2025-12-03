@@ -12,6 +12,14 @@ void BaseReader::reset()
 	file.clear();
 	file.seekg(data_start_pos, std::ios::beg);
 
+	// Delete Fourier information
+	if (fft_arr)
+	{
+		fftw_destroy_plan(p);
+		fftw_free(fft_arr);
+		fft_arr = nullptr;
+	}
+
 	// Reset the buffer state
 	buf_pos = 0;
 	buf_max = 0;
@@ -45,7 +53,7 @@ size_t BaseReader::fill_2d(double* dyn_spec, size_t time_steps, size_t freq_num)
 
         // Create the FFTW plan for a real-to-complex FFT of size samples_per_chunk
         // Uses FFTW_MEASURE for potentially better performance at the cost of initialization time
-        p = fftw_plan_dft_r2c_1d(samples_per_chunk, plan_input, fft_arr, FFTW_MEASURE);
+        p = fftw_plan_dft_r2c_1d(samples_per_chunk, plan_input, fft_arr, FFTW_ESTIMATE);
         // Clean up scratch buffer -- plan is now independent
         fftw_free(plan_input);
 

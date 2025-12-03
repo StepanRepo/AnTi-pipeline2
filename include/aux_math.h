@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <vector>
 
+#include <fftw3.h>      // For FFTW library types (fftw_complex, fftw_plan)
+
 namespace math
 {
     // --- Basic Math ---
@@ -19,9 +21,11 @@ namespace math
     double median(double* a, size_t n);
     double var(double *a, size_t n, double ddof = 0.0);
     void sigmaclip(double *a, bool *mask, size_t n, double threshold, double* mu = nullptr, double* sigma = nullptr);
+    void kurtosis_2d(double *data, double *result, size_t n, size_t m);
 
     // --- Time-domain profile processing ---
 	void subtract_baseline(double *data, size_t n, size_t window_size);
+    // --- Freq-domain profile processing ---
 
     // --- FITS Layout Conversion ---
     // Converts nD data from C-Style (Row-Major) to Fortran-Style (Col-Major)

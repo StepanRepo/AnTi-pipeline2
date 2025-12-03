@@ -143,7 +143,7 @@ void VDIFHeader::print() const
 
 void IAA_vdif::set_limit(double t)
 {
-	header.CUT_SIZE = size_t (t * 1.0e3/header.tau);
+	header.CUT_SIZE = size_t (t * 1.0e6 * header.sampling);
 }
 
 // Implementation of the VDIFHeader::decode method.
@@ -247,6 +247,7 @@ IAA_vdif::IAA_vdif(const std::string& filename_in, size_t buffer_size):
 		header_ptr = &header;
 
 		n_read = 0;
+		n_read0 = 0;
 
 		std::filesystem::path p = filename_in;
 		filename = p.stem();
@@ -492,7 +493,6 @@ bool IAA_vdif::fill_buffer()
 
 		t_prev = t_cur; // Update previous time for the next iteration
 	}
-
 							
 	return true; // Indicate successful filling (or reaching EOF/buffer limit)
 }
@@ -512,8 +512,32 @@ void IAA_vdif::skip(double sec)
 	read_frame();
 	buf_pos += steps;
 	n_read = size_t(frames) * header.n_samples + steps;
+	n_read0 = n_read;
 	header.t0 += (n_read) * 1.0e-6 / header.sampling /86400.0;
 	data_start_pos = file.tellg(); // Update effective start
+}	
+
+void IAA_vdif::reset()
+{
+	if (!file.is_open())
+		throw std::runtime_error("File is not open");
+
+	// Reset the file state
+	file.clear();
+	file.seekg(data_start_pos, std::ios::beg);
+
+	// Delete Fourier information
+	if (fft_arr)
+	{
+		fftw_destroy_plan(p);
+		fftw_free(fft_arr);
+		fft_arr = nullptr;
+	}
+
+	// Reset the buffer state
+	buf_pos = 0;
+	buf_max = 0;
+	n_read = n_read0;
 }	
 
 double IAA_vdif::point2time(size_t points)

@@ -175,7 +175,7 @@ if __name__ == "__main__":
     for filename in path.glob("*.fits"):
         print(f"Processing {filename.stem}")
 
-        binning = 1
+        binning = 2*8
 
         data_2d, freqs, tl = read(filename)
         data_2d = data_2d.T
@@ -184,7 +184,8 @@ if __name__ == "__main__":
         freqs = freqs * u.MHz
 
         if (data_2d.shape[0] > 1):
-            data_2d = bin_time(data_2d, binning)
+            data_2d = bin_time(data_2d.T, binning).T
+            tl = tl[::binning][:data_2d.shape[1]]
 
 
             nchan = data_2d.shape[0]
@@ -236,6 +237,10 @@ if __name__ == "__main__":
 
             ax[0, 1].set_xscale("log")
             ax[0, 1].plot(fr, freqs)
+            ax[0, 1].set_ylim(freqs[0].to_value(u.MHz), freqs[-1].to_value(u.MHz))
+
+            #clipped, l, u = sigmaclip(np.log(fr[fr>0]), 3, 3)
+            #mask = (np.log(fr) > l) & (np.log(fr) < u)
             #fr[~mask] = np.nan
             #ax[0, 1].plot(fr, freqs)
 
@@ -255,9 +260,16 @@ if __name__ == "__main__":
             fig, ax = plt.subplots(1, 1)
             fig.suptitle(filename.stem)
 
-            ax.plot(tl.to(u.ms), data_2d[0])
-            ax.set_xlabel("Time, ms")
+            val = u.ms
+
+            ax.plot(tl.to(val), data_2d[0])
+            ax.set_xlabel(f"Time, {val}")
             ax.set_ylabel("Integal Intensity")
+            #ax.set_ylim(-10, 50)
+
+            tmax = tl[np.argmax(data_2d[0])]
+            dt = 5*u.us
+            #ax.set_xlim((tmax - dt).to_value(val), (tmax + dt).to_value(val))
 
 
 

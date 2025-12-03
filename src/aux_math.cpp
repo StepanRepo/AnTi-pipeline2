@@ -3,6 +3,7 @@
 #include <unsupported/Eigen/CXX11/Tensor>
 #include <cmath> // for sqrt, abs
 #include <iostream>
+#include <deque>
 
 namespace math 
 {
@@ -144,48 +145,121 @@ namespace math
 			delete[] mask;
 	}
 
+    void kurtosis_2d(double *data, double *kurt, size_t nt, size_t nf)
+	{
+		double* sum1 = new double[nf];
+		double* sum2 = new double[nf];
+		double* sum4 = new double[nf];
+		double* slice = new double[nf];
+
+		std::fill(sum1, sum1 + nf, 0.0);
+		std::fill(sum2, sum2 + nf, 0.0);
+		std::fill(sum4, sum4 + nf, 0.0);
+
+
+		for (size_t i = 0; i < nt; ++i)
+		{
+			std::memcpy(slice, data + i*nf, sizeof(double)*nf);
+
+			vec_add(sum1, slice, nf);
+
+			vec_prod(slice, slice, nf);
+			vec_add(sum2, slice, nf);
+
+			vec_prod(slice, slice, nf);
+			vec_add(sum4, slice, nf);
+		}
+
+		for (size_t i = 0; i < nf; ++i)
+			sum1[i] = sum1[i] / double(nt);
+
+		for (size_t i = 0; i < nf; ++i)
+			sum2[i] = sum2[i] / double(nt);
+
+		vec_prod(sum1, sum1, nf);
+		vec_sub(sum2, sum1, nf);
+
+		for (size_t i = 0; i < nf; ++i)
+			sum4[i] = sum4[i] / double(nt);
+
+		for (size_t i = 0; i < nf; ++i)
+		{
+			if (sum2[i] > 0.0)
+				kurt[i] = sum4[i] / (sum2[i] * sum2[i]) - 3.0;
+			else
+				kurt[i] = 0.0;
+		}
+
+		if (nt > 3)
+		{
+			for (size_t i = 0; i < nf; ++i)
+				kurt[i] = (nt - 1) / ((nt - 2)*(nt - 3)) * ((nt + 1)*kurt[i] + 6);
+		}
+
+
+		delete[] sum1;
+		delete[] sum2;
+		delete[] sum4;
+		delete[] slice;
+	}
+
 	// ------------------------------------------------------------
 	// 3. Time-domain profile processing
 	// ------------------------------------------------------------
 	void subtract_baseline(double *data, size_t n, size_t window_size) 
 	{
 		if (n == 0 || window_size == 0 || window_size > n) return;
-		bool *mask = nullptr;
-		double *window = nullptr;
 
-		mask = new bool[window_size];
-		window = new double[window_size];
+		// Circular buffer for current window
+		double* window = new double[window_size];
+		size_t head = 0;  // Next write position in circular buffer
 
-		double mu, std, med;
-
-
-		for (size_t i = 0; i < n-window_size; ++i) 
-		{
-			std::memcpy(window, data+i, window_size*sizeof(double));
-
-			med = median(window, window_size);
-			sigmaclip(window, mask, window_size, 3.0, &mu, &std);
-
-			if (std == 0.0) std = 1.0; // Avoid division by zero
-
-			// Apply normalization: (x - median) / std
-			data[i] = (data[i] - med) / std;
+		// Initialize first window: copy first 'window_size' elements
+		for (size_t i = 0; i < window_size; ++i) {
+			window[i] = data[i];
 		}
 
-		for (size_t i = n-window_size; i < n; ++i) 
-		{
-			std::memcpy(window, data+i, (n-i)*sizeof(double));
-			med = median(window, n-i);
-			sigmaclip(window, mask, n-i, 3.0, &mu, &std);
-
-			if (std == 0.0) std = 1.0; // Avoid division by zero
-
-			// Apply normalization: (x - median) / std
-			data[i] = (data[i] - med) / std;
+		// Precompute initial sum and sum of squares
+		double sum = 0.0, sum_sq = 0.0;
+		for (size_t i = 0; i < window_size; ++i) {
+			sum += window[i];
+			sum_sq += window[i] * window[i];
 		}
 
+		// Process each point with sliding window
+		for (size_t i = 0; i < n; ++i) 
+		{
+			// Compute mean and std for current window
+			double mean = sum / window_size;
+			double variance = (sum_sq - sum * mean) / (window_size - 1);
+			double std = std::sqrt(variance);
 
-		delete[] mask;
+			if (std == 0.0) std = 1.0;  // Avoid division by zero
+
+			// Normalize current point: (x - mean) / std
+			data[i] = (data[i] - mean) / std;
+
+			// Update window for next iteration (if not last point)
+			if (i < n - 1) 
+			{
+				double new_val = (i + 1 < n) ? data[i + 1] : data[n - 1];
+				if (new_val - mean > 3.0*std) continue;
+
+				// Remove oldest value (at head)
+				double old_val = window[head];
+				sum -= old_val;
+				sum_sq -= old_val * old_val;
+
+				// Add new value (repeat last value at boundary)
+				window[head] = new_val;
+				sum += new_val;
+				sum_sq += new_val * new_val;
+
+				// Advance head (circular)
+				head = (head + 1) % window_size;
+			}
+		}
+
 		delete[] window;
 	}
 

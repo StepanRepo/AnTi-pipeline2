@@ -124,24 +124,20 @@ void detect(fftw_complex* t_space, double* sum, size_t nchann)
 	}
 }
 
-std::vector<size_t> matched_filter(const double* data, size_t N, double threshold)
+void Profile::matched_filter(double* data, size_t N, double threshold, std::vector<size_t>& pos, std::vector<double>& power)
 {
-    thread_local static std::vector<double> mask, edges;
+    thread_local static std::vector<signed char> mask, edges;
+
+
     if (mask.size() != N) mask.resize(N);
     if (edges.size() != N) edges.resize(N);
 
 	std::vector<size_t> rises(0), falls(0); 
 
-	std::memcpy(mask.data(), data, N*sizeof(double));
-	math::subtract_baseline(mask.data(), N, 100);
 
 	for (size_t i = 0; i < N; ++i)
-		if (mask[i] < threshold) 
-			mask[i] = 0.0;
-		else
-			mask[i] = 1.0;
+		mask[i] = data[i] < threshold ? 0 : 1;
 
-	std::memcpy(edges.data(), mask.data(), N*sizeof(double));
 	for (size_t i = 0; i < N-1; ++i)
 		edges[i] = mask[i+1] - mask[i];
 	edges[N-1] = 0.0;
@@ -158,12 +154,77 @@ std::vector<size_t> matched_filter(const double* data, size_t N, double threshol
 	if (rises.size() < falls.size())
 		falls.erase(falls.begin());
 
+	pos.resize(2*rises.size());
+	power.resize(rises.size());
+
+	size_t a, b;
+	for(size_t i = 0; i < rises.size(); ++i)
+	{
+		a = rises[i];
+		b = falls[i];
+		power[i] = math::mean(data + a, b-a);
+	}
+
+	size_t counter = 0;
 	for (size_t i = 0; i < rises.size(); ++i)
-		rises[i] = (rises[i] + falls[i])/2.0;
+	{
+		if (power[i] < threshold) continue;
 
+		pos[2*counter] = rises[i];
+		pos[2*counter+1] = falls[i];
+		power[counter] = power[i];
+		counter ++;
+	}
 
-	return rises;
+	pos.resize(2*counter);
+	power.resize(counter);
 }
+
+std::string Profile::csv_result (size_t left, size_t right, double power, size_t n_DM, std::vector<size_t>& pulses_dm0, std::vector<double>& power_dm0) const
+{
+	std::ostringstream row("");
+	row << std::fixed << std::setprecision(19); // f5.14 (down to ns in MJD)  
+
+	double mjd_left  = hdr->t0 + reader->point2time(sumidx + left)/86400.0;
+	double mjd_right = hdr->t0 + reader->point2time(sumidx + right)/86400.0;
+
+	row << mjd_left << "; ";
+	row << mjd_right << "; ";
+	row << power << "; ";
+
+
+	for(size_t j = 0; j < power_dm0.size(); ++j)
+	{
+		if (pulses_dm0[2*j] - left < n_DM)
+		{
+			mjd_left  = hdr->t0 + reader->point2time(sumidx + pulses_dm0[2*j])/86400.0;
+			row << mjd_left << ", ";
+		}
+	}
+	row << '\b' << '\b' << "; ";
+
+	for(size_t j = 0; j < power_dm0.size(); ++j)
+	{
+		if (pulses_dm0[2*j] - left < n_DM)
+		{
+			mjd_right  = hdr->t0 + reader->point2time(sumidx + pulses_dm0[2*j+1])/86400.0;
+			row << mjd_right << ", ";
+		}
+	}
+	row << '\b' << '\b' << "; ";
+
+	for(size_t j = 0; j < power_dm0.size(); ++j)
+	{
+		if (pulses_dm0[2*j] - left < n_DM)
+		{
+			row << power_dm0[j] << ", ";
+		}
+	}
+	row << '\b' << '\b' << "; ";
+
+	return row.str();
+}
+
 
 
 
@@ -460,7 +521,7 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 
 	buf_pos = buf_max - n_DM;
 	sumidx += buf_pos;
-	std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
+	std::cout << "t = " << reader->point2time(sumidx) << " s" << std::endl;
 
 
 	if (save_raw)
@@ -526,22 +587,36 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 	return id;
 }
 
-std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann)
+std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann, double  BL_window_s, double threshold)
 {
 
 	check_incoherent(nchann);
 
-	size_t obs_window;
+	size_t obs_window, BL_window;
 	double tau;
 	size_t n_DM;
 	double fcomp, fmin, fmax;
 	size_t buf_pos, buf_max;
 
-	std::ofstream info(output_dir + "info.csv");
+	bool is_pulse = false;
+	bool eof = false;
 
 	int *shift = nullptr;
 	double *pre = nullptr, *post = nullptr;
 	double *sum_dm0 = nullptr, *sum_dm1 = nullptr;
+
+
+	std::srand(time(NULL));
+	std::string id = "";
+	id += std::to_string(std::rand());
+	id += ".csv";
+	std::ofstream csv(output_dir + id);
+
+	// write table header
+	csv << "# ===== Search Results =====" << std::endl;
+	csv << "# left; right; power; dm0_lefts; dm0_rights; dm0_powers;" << std::endl;
+	size_t empty_size =  csv.tellp();
+
 
 	fmin = hdr->fmin;
 	fmax = hdr->fmax;
@@ -569,100 +644,122 @@ std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann)
 	buf_max = 0;
 	sumidx = 0;
 
-	while(true)
-	{
+	std::vector<size_t> pulses_dm0, pulses_dm1;
+	std::vector<double> power_dm0, power_dm1;
+	size_t N = 0;
 
+	BL_window = size_t(BL_window_s/hdr->tau * 1.0e3);
+
+	while(true && !eof)
+	{
 		if (buf_pos + obs_window >= buf_max)
 			fill_2d(pre, nchann, buf_pos, buf_max, obs_window);
 
 		if (buf_max < obs_window)
-			break; // EOF is reached
+		{
+			eof = true; // EOF is reached
 
-		std::cout << "You should not see this text" << std::endl;
-		// save processed buffer
-		// regecting last n_DM inputs
-		//  dyn_output.write(reinterpret_cast<const char*>(post),
-		//			nchann * (buf_max - n_DM) * sizeof(double));
+			// zero padding to save the last part of the file
+			std::fill(pre + buf_max*nchann, pre + obs_window*nchann, 0.0);
+		}
 
+		N = buf_max - n_DM;
+		shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
+
+		for (size_t t = 0; t < N; ++t) 
+			sum_dm0[t] = math::mean(pre + t*nchann, nchann);
+
+		for (size_t t = 0; t < N; ++t) 
+			sum_dm1[t] = math::mean(post + t*nchann, nchann);
+
+
+
+		math::subtract_baseline(sum_dm0, N, BL_window);
+		math::subtract_baseline(sum_dm1, N, BL_window);
+
+		/*
+		 *std::ofstream test0(output_dir + "test0.bin");
+		 *test0.write((char*) sum_dm0, N*sizeof(double));
+		 *test0.close();
+		 *std::ofstream test1(output_dir + "test1.bin");
+		 *test1.write((char*) sum_dm1, N*sizeof(double));
+		 *test1.close();
+		 *
+		 */
+
+
+		matched_filter(sum_dm0, N, threshold, pulses_dm0, power_dm0);
+		matched_filter(sum_dm1, N, threshold, pulses_dm1, power_dm1);
+
+
+		// save info of the search
+		for(size_t i = 0; i < power_dm1.size(); ++i)
+			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], n_DM, pulses_dm0, power_dm0) << '\n';
+
+
+		// save profiles of the search
+		is_pulse = pulses_dm1.size() > 0;
+
+		if (save_raw && is_pulse) 
+		{
+			PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename);
+			writer1.createPrimaryHDU("SEARCH", hdr);
+			writer1.append_subint_search(
+					pre, nullptr,
+					buf_max - n_DM, nchann, 1, 
+					DM, fmin, fmax, tau);
+		}
+
+		if (save_dyn && is_pulse) 
+		{
+			PSRFITS_Writer writer1(output_dir + "dyn_" + reader->filename);
+			writer1.createPrimaryHDU("SEARCH", hdr);
+			writer1.append_subint_search(
+					post, nullptr,
+					buf_max - n_DM, nchann, 1, 
+					DM, fmin, fmax, tau);
+		}
+
+		if (save_sum && is_pulse) 
+		{
+			PSRFITS_Writer writer0(output_dir + "sum0_" + reader->filename);
+			writer0.createPrimaryHDU("SEARCH", hdr);
+			writer0.append_subint_search(
+					sum_dm0, nullptr,
+					buf_max - n_DM, 1, 1, 
+					0, fmin, fmax, tau);
+
+			PSRFITS_Writer writer1(output_dir + "sum1_" + reader->filename);
+			writer1.createPrimaryHDU("SEARCH", hdr);
+			writer1.append_subint_search(
+					sum_dm1, nullptr,
+					buf_max - n_DM, 1, 1, 
+					DM, fmin, fmax, tau);
+		}
 
 		buf_pos = buf_max - n_DM;
 		sumidx += buf_pos;
 		std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
 	}
 
-	size_t N = buf_max - n_DM;
-	// zero padding to save the last part of the file
-	std::fill(pre + buf_max*nchann, pre + obs_window*nchann, 0.0);
-	shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
 
+	delete[] shift;
+	delete[] pre;
+	delete[] post;
+	delete[] sum_dm1;
+	delete[] sum_dm0;
 
-	for (size_t t = 0; t < N; ++t) 
-		sum_dm0[t] = std::accumulate(pre + t*nchann, pre + (t+1)*nchann, 0.0) / double(nchann);
-
-	for (size_t t = 0; t < N; ++t) 
-		sum_dm1[t] = std::accumulate(post + t*nchann, post + (t+1)*nchann, 0.0) / double(nchann);
-
-	std::vector<size_t> pulses_dm0, pulses_dm1;
-	pulses_dm0 = matched_filter(sum_dm0, N, 5.0);
-	pulses_dm1 = matched_filter(sum_dm1, N, 5.0);
-
-	for (auto it = pulses_dm1.begin(); it != pulses_dm1.end(); ++it) 
-		std::cout << *it << std::endl;
-
-	bool is_pulse = true;
-
-	if (save_raw && is_pulse) 
+	if (size_t(csv.tellp()) > empty_size)
 	{
-		PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename);
-		writer1.createPrimaryHDU("SEARCH", hdr);
-		writer1.append_subint_search(
-				pre, nullptr,
-				buf_max - n_DM, nchann, 1, 
-				DM, fmin, fmax, tau);
+		csv.close();
+		return id;
 	}
-
-	if (save_dyn && is_pulse) 
+	else 
 	{
-		PSRFITS_Writer writer1(output_dir + "dyn_" + reader->filename);
-		writer1.createPrimaryHDU("SEARCH", hdr);
-		writer1.append_subint_search(
-				post, nullptr,
-				buf_max - n_DM, nchann, 1, 
-				DM, fmin, fmax, tau);
+		csv.close();
+		std::remove(id.c_str());
+		return "";
 	}
-
-	if (save_sum && is_pulse) 
-	{
-		std::ofstream test(output_dir + "test0.bin");
-		test.write((char*) sum_dm0, (buf_max - n_DM) * sizeof(double));
-		test.close();
-
-		test.open(output_dir + "test1.bin");
-		test.write((char*) sum_dm1, (buf_max - n_DM) * sizeof(double));
-		test.close();
-
-
-
-		PSRFITS_Writer writer0(output_dir + "sum0_" + reader->filename);
-		writer0.createPrimaryHDU("SEARCH", hdr);
-		writer0.append_subint_search(
-				sum_dm0, nullptr,
-				buf_max - n_DM, 1, 1, 
-				0, fmin, fmax, tau);
-
-		PSRFITS_Writer writer1(output_dir + "sum1_" + reader->filename);
-		writer1.createPrimaryHDU("SEARCH", hdr);
-		writer1.append_subint_search(
-				sum_dm1, nullptr,
-				buf_max - n_DM, 1, 1, 
-				DM, fmin, fmax, tau);
-	}
-
-	buf_pos = buf_max - n_DM;
-	sumidx += buf_pos;
-	std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
-
-	return "";
 }
 
 
@@ -751,13 +848,17 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	buf_pos = 0;
 	sumidx = 0;
 
-	while(true)
+	bool eof = false;
+	while(true && !eof)
 	{
 		if (buf_pos + obs_window >= buf_max)
 			fill_1d(buff, buf_pos, buf_max, obs_window);
 
 		if (buf_max < obs_window)
-			break; // EOF is reached
+		{
+			eof = true; // EOF is reached
+			std::fill(buff + buf_max, buff + obs_window, 0.0);
+		}
 
 		shift_window_coherent(fft, ifft, f_space+1, dphase, nchann);
 		detect(t_space, sum, nchann);
@@ -810,26 +911,6 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 		//			(freq_num) * sizeof(double));
 		//}
 	}
-	std::fill(buff + buf_max, buff + obs_window, 0.0);
-
-	shift_window_coherent(fft, ifft, f_space+1, dphase, nchann);
-	detect(t_space, sum, nchann);
-
-	buf_pos = buf_max - 2*n_DM;
-	sumidx += buf_pos/2;
-	std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
-
-	if (save_raw)
-		raw_output.write(reinterpret_cast<const char*>(buff + 2*n_DM),
-				(buf_max - 2*n_DM) * sizeof(double));
-
-	if (save_dyn)
-		dyn_output.write(reinterpret_cast<const char*>(t_space + n_DM),
-				(buf_max/2 - n_DM) * sizeof(fftw_complex));
-
-	if (save_sum)
-		sum_output.write(reinterpret_cast<const char*>(sum + n_DM),
-				(buf_max/2 - n_DM) * sizeof(double));
 
 
 	if (save_raw)
@@ -877,6 +958,183 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	fftw_free(t_space);
 
 	return id;
+}
+
+std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double BL_window_s, double threshold)
+{
+
+	check_coherent();
+
+	double *buff;
+	size_t n_DM, obs_window;
+	size_t BL_window;
+	size_t buf_pos, buf_max;
+
+	double fcomp, fmin, fmax;
+	double tau;
+
+	fftw_complex* dphase;
+	fftw_complex* dphase0;
+	fftw_complex *f_space, *t_space;
+	double *sum_dm0, *sum_dm1;
+	fftw_plan fft, ifft;
+
+	fmin = hdr->fmin;
+	fmax = hdr->fmax;
+	fcomp = hdr->fcomp;
+	tau = hdr->tau;
+
+	double dtmax = 4.15e6 * DM * (std::pow(std::min(fmax, fmin), -2) - std::pow(std::max(fmax, fmin), -2));
+	n_DM = static_cast<size_t>(dtmax/tau);
+	n_DM += n_DM % 2;
+	
+	if (nchann <= n_DM)
+        throw std::runtime_error("The number of channels is too small for coherent dedispersion. Set at least 2^" + std::to_string(size_t(std::log2(n_DM)) + 1));
+	obs_window = 2*nchann;
+
+
+	dphase = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann)));
+	dphase0 = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann)));
+	calc_shift_phase(dphase, DM, fcomp, fmin, fmax, nchann, redshift);
+
+	for (size_t i = 0; i < nchann; ++i)
+	{
+		dphase0[i][0] = 1.0;
+		dphase0[i][1] = 0.0;
+	}
+
+
+	buff    = (double*) (fftw_malloc(sizeof(double) * obs_window));
+	sum_dm0 = (double*) (fftw_malloc(sizeof(double) * nchann));
+	sum_dm1 = (double*) (fftw_malloc(sizeof(double) * nchann));
+	t_space = (fftw_complex*) (fftw_malloc(sizeof(fftw_complex) * (nchann)));
+	f_space = (fftw_complex*) (fftw_malloc(sizeof(fftw_complex) * (nchann+1)));
+
+	fft  = fftw_plan_dft_r2c_1d(obs_window, buff, f_space, FFTW_ESTIMATE);
+	ifft = fftw_plan_dft_1d(nchann, f_space+1, t_space, FFTW_BACKWARD, FFTW_ESTIMATE);
+
+
+	std::srand(time(NULL));
+	std::string id = "";
+	id += std::to_string(std::rand());
+	id += ".csv";
+	std::ofstream csv(output_dir + id);
+
+	// write table header
+	csv << "# ===== Search Results =====" << std::endl;
+	csv << "# left; right; power; dm0_lefts; dm0_rights; dm0_powers;" << std::endl;
+	size_t empty_size =  csv.tellp();
+
+	buf_pos = 0;
+	buf_max = 0;
+	sumidx = 0;
+
+	std::vector<size_t> pulses_dm0, pulses_dm1;
+	std::vector<double> power_dm0, power_dm1;
+	size_t N = 0;
+	bool eof = false;
+	bool is_pulse = false;
+
+	BL_window = size_t(BL_window_s/hdr->tau * 1.0e3);
+
+
+	std::fill(buff, buff + 2*n_DM, 0.0);
+	buf_max = 2*n_DM;
+
+	while(true && !eof)
+	{
+
+		if (buf_pos + obs_window >= buf_max)
+			fill_1d(buff, buf_pos, buf_max, obs_window);
+
+		if (buf_max < obs_window)
+		{
+			eof = true; // EOF is reached
+			std::fill(buff + buf_max, buff + obs_window, 0.0);
+		}
+
+
+		N = buf_max - n_DM;
+		shift_window_coherent(fft, ifft, f_space+1, dphase0, nchann);
+		detect(t_space, sum_dm0, nchann);
+
+		shift_window_coherent(fft, ifft, f_space+1, dphase, nchann);
+		detect(t_space, sum_dm1, nchann);
+
+
+		math::subtract_baseline(sum_dm0+n_DM, N, BL_window);
+		math::subtract_baseline(sum_dm1+n_DM, N, BL_window);
+
+		matched_filter(sum_dm0+n_DM, N, threshold, pulses_dm0, power_dm0);
+		matched_filter(sum_dm1+n_DM, N, threshold, pulses_dm1, power_dm1);
+
+		// save info of the search
+		for(size_t i = 0; i < power_dm1.size(); ++i)
+			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], n_DM, pulses_dm0, power_dm0) << '\n';
+
+		//for(size_t i = 0; i < power_dm0.size(); ++i)
+		//	std::cout << "dm0: " << reader->point2time(sumidx + pulses_dm0[i]) << std::endl;
+		//for(size_t i = 0; i < power_dm1.size(); ++i)
+		//	std::cout << "dm1: " << reader->point2time(sumidx + pulses_dm1[i]) << std::endl;
+
+
+		// save profiles of the search
+		is_pulse = pulses_dm1.size() > 0;
+
+		if (save_raw && is_pulse) 
+		{
+			PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename);
+			writer1.createPrimaryHDU("SEARCH", hdr);
+			writer1.append_subint_search(
+					buff + 2*n_DM, nullptr,
+					2*N, 1, 1, 
+					DM, fmin, fmax, tau);
+		}
+
+		if (save_dyn && is_pulse) 
+		{
+			PSRFITS_Writer writer1(output_dir + "dyn_" + reader->filename);
+			writer1.createPrimaryHDU("SEARCH", hdr);
+			writer1.append_subint_search(
+					(double*) (t_space + n_DM), nullptr,
+					N, 2, 1, 
+					DM, fmin, fmax, tau, true);
+		}
+
+		if (save_sum && is_pulse) 
+		{
+			PSRFITS_Writer writer0(output_dir + "sum0_" + reader->filename);
+			writer0.createPrimaryHDU("SEARCH", hdr);
+			writer0.append_subint_search(
+					sum_dm0 + n_DM, nullptr,
+					N, 1, 1, 
+					0, fmin, fmax, tau);
+
+			PSRFITS_Writer writer1(output_dir + "sum1_" + reader->filename);
+			writer1.createPrimaryHDU("SEARCH", hdr);
+			writer1.append_subint_search(
+					sum_dm1 + n_DM, nullptr,
+					N, 1, 1, 
+					DM, fmin, fmax, tau);
+		}
+
+		buf_pos = buf_max - n_DM;
+		sumidx += buf_pos/2;
+		std::cout << "t = " << reader->point2time(sumidx) << " s" << std::endl;
+	}
+
+
+	if (size_t(csv.tellp()) > empty_size)
+	{
+		csv.close();
+		return id;
+	}
+	else 
+	{
+		csv.close();
+		std::remove(id.c_str());
+		return "";
+	}
 }
 
 void Profile::fold_dyn(double P, size_t nchann)
@@ -1184,10 +1442,6 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 	double *buff = nullptr; 
 	buff = (double*) fftw_malloc(sizeof(double) * nchann * obs_window);
 
-	bool *filt = nullptr;
-	double *temp = nullptr;
-	filt = new bool[nchann];
-	temp = new double[nchann];
 
 	// go to the beginning of the file,
 	// remembering current position
@@ -1199,7 +1453,18 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 	size_t buf_max = 0;
 	size_t counter = 0;
 
+	// ===== Kurtosis calculation ===== 
+	double* sum1 = new double[nchann];
+	double* sum2 = new double[nchann];
+	double* sum4 = new double[nchann];
+	double* slice;
+
 	std::fill(fr, fr + nchann, 0.0);
+	std::fill(sum1, sum1 + nchann, 0.0);
+	std::fill(sum2, sum2 + nchann, 0.0);
+	std::fill(sum4, sum4 + nchann, 0.0);
+
+
 	while(true)
 	{
 		filled = fill_2d(buff, nchann, buf_pos, buf_max, obs_window);
@@ -1208,32 +1473,100 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 
 		for (size_t i = 0; i < filled; ++i)
 		{
+			slice = buff + i*nchann;
+
 			math::vec_add(fr, buff + i*nchann, nchann);
+			math::vec_add(sum1, slice, nchann);
+
+			math::vec_prod(slice, slice, nchann);
+			math::vec_add(sum2, slice, nchann);
+
+			math::vec_prod(slice, slice, nchann);
+			math::vec_add(sum4, slice, nchann);
+
+
 			counter += 1;
 
 			if (counter > max_len && max_len > 0) break;
+
+			std::cout << "\r\033[K"; // move to the beginning of the line and clear the line
+			std::cout << "steps: " << i << std::flush;
 		}
 
 		buf_pos += filled;
 		if (counter > max_len && max_len > 0) break;
 	}
+	std::cout << std::endl;
+
+	// m1, m2, m4
+	for (size_t i = 0; i < nchann; ++i)
+		sum1[i] = sum1[i] / double(counter);
+
+	for (size_t i = 0; i < nchann; ++i)
+		sum2[i] = sum2[i] / double(counter);
+
+	for (size_t i = 0; i < nchann; ++i)
+		sum4[i] = sum4[i] / double(counter);
+
+	// sigma^2
+	math::vec_prod(sum1, sum1, nchann);
+	math::vec_sub(sum2, sum1, nchann);
+
+
+	for (size_t i = 0; i < nchann; ++i)
+	{
+		if (sum2[i] > 0.0)
+			sum4[i] = sum4[i] / (sum2[i] * sum2[i]) - 3.0;
+		else
+			sum4[i] = 0.0;
+	}
+
+	double cou = counter;
+	if (counter > 3)
+	{
+		for (size_t i = 0; i < nchann; ++i)
+			sum4[i] = (cou - 1) / ((cou - 2)*(cou - 3)) * ((cou + 1)*sum4[i] + 6);
+	}
+
+	std::ofstream test(output_dir + "test.bin");
+	test.write((char*) sum4, nchann*sizeof(double));
+	test.close();
+	// ===== Kurtosis calculation ===== 
+
+
+
+	
+
+	// ===== Filtration section ===== 
+	
+
+	bool *filt = nullptr;
+	double *temp = nullptr;
+	filt = new bool[nchann];
+	temp = new double[nchann];
 
 	// log the bandpass to stabilize the algotithm
+	double mean_sens = math::mean(fr, nchann);
 	for (size_t i = 0; i < nchann; ++i)
-		temp[i] = std::log(fr[i]); 
-
+	{
+		if (filt[i] && fr[i] > tail_threshold * mean_sens)
+			temp[i] = std::log(fr[i]); 
+		else
+			temp[i] = 0.0;
+	}
 
 
 
 	// Find the difference between neighboring elements of an array
 	// (function returns mask[0] = temp[0])
 	std::adjacent_difference(temp, temp + nchann, mask);
+
+
 	mask[0] = 0.0; 
 	math::sigmaclip(mask, filt, nchann, sig_threshold);
 
 	// finilize the rejection by cutting the tails 
 	// where the sensitivity is low
-	double mean_sens = math::mean(fr, nchann);
 	for (size_t i = 0; i < nchann; ++i)
 	{
 		if (filt[i] && fr[i] > tail_threshold * mean_sens)
@@ -1241,6 +1574,9 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 		else
 			mask[i] = 0.0;
 	}
+
+
+
 
 	// Normilize mask according to the PSRFITS standard
 	double max = *std::max_element(mask, mask + nchann);
@@ -1256,6 +1592,9 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 
 	delete[] temp;
 	delete[] filt;
+	delete[] sum1;
+	delete[] sum2;
+	delete[] sum4;
 	fftw_free(buff);
 	temp = nullptr;
 	filt = nullptr;

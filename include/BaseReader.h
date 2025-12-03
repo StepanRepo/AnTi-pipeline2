@@ -45,7 +45,7 @@ class BaseReader
 
 		size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num);
 
-		void reset();
+		virtual void reset();
 
 		// Virtual destructor
 		virtual ~BaseReader() = default;

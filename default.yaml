@@ -1,5 +1,5 @@
 general:
-  mode: "search"
+  mode: "stream"
   input_dir: "data"
   output_dir: "data"
   parfile: "0329.par"
@@ -7,12 +7,12 @@ general:
   verbose: 1
   buf_size: 10
 
-  #t0: 17.5
-  #t1: 20.0
+  t0: 479.0
+  t1: 480.0
   
-  save_raw: false
+  save_raw: true
   save_dyn: false
-  save_sum: true
+  save_sum: false
 
 
 
@@ -25,11 +25,14 @@ options:
   #nchann: 33554432
   nchann: 2048
   #nchann: 512
-  mask: ""              # External file containing mask. Has higher priority than the filtration
+
+  bl_window: 100.0e-6
+  threshold: 20.0
+
   filter: true
   tail_threshold: .5    
   std_threshold: 3.0
-  max_len: 0
+  max_len: 1000
 
   
 # Owerwrite files' headers
@@ -43,11 +46,5 @@ advanced:
   dm: 56.7712
 
 files:
-   - Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif 
-#  - wideband_1024_2048.vdif
-#  - rup106_bd_321-1252_ch07.vdif
-#  - 010818_0329+54_00adc
-#  - 020818_0329+54_00adc
-#  - 011022_1133+16_00adc
-#  - 011222_1133+16_00adc
-#  - 220621_0531+21_00adc
+  - rup103_bv_055-0550_ch01.vdif
+  #- rup103_bv_055-0612_ch01.vdif_147601.vdif

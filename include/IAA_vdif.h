@@ -90,7 +90,7 @@ class IAA_vdif : public BaseReader
 		char* h_buffer; 			// Buffer to hold the raw 32-byte header
 		char* raw_data;
 
-		size_t n_read;
+		size_t n_read, n_read0;
 
 		// Private helper function to unpack N-bit integer data into double precision floating point.
 		void unpack_nbit_to_double
@@ -132,6 +132,7 @@ public:
 
 	virtual void skip(double sec) override;
 	virtual void set_limit(double t) override; // implement in .cpp
+	virtual void reset() override;
 };
 
 #endif // IAA_VDIF_H

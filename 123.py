@@ -3,28 +3,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from myplot import *
-import psrchive
+import pandas as pd
 
+data = pd.read_csv("data/Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif.csv", comment = "#", sep = ";")
 
-arch = psrchive.Archive.load("data/010818_0329+54_00adc.psrfits")
-data = arch.get_data()
-
-s = data.shape
-#data = data.reshape(*s[::-1]).T
-
-print(data.shape)
-
-
+pwr = data.iloc[:, 2]
 
 plt.figure()
-plt.imshow(data[0, 0],
-           cmap = "Greys",
-           origin = "lower",
-           aspect = "auto",
-           interpolation = "none")
-plt.figure()
-plt.plot(np.sum(data[0, 0], axis = 0))
-plt.figure()
-plt.plot(np.sum(data[0, 0], axis = 1))
+plt.hist(pwr, bins = 100)
 
 save_image("plot.pdf")

@@ -13,6 +13,8 @@
 
 #include "Profile.h" 
 
+namespace fs = std::filesystem;
+
 std::string resolve_path(const std::string& input) 
 {
 	std::string til_result, result;
@@ -249,7 +251,6 @@ int main()
 			profile.reader->set_limit(t1);
 
 
-
 		// Find redshift correction if the parameter file is available
 		// if not, the redshift is defaulted to zero
 		if (parfile != "")
@@ -337,25 +338,35 @@ int main()
 		{
 			// Parse mode-specific options
 			size_t nchann = 0;
+			double bl_window;
+			double threshold;
 			std::string ddtype = "";
+			std::string id = "";
+			std::string new_filename = filename + ".csv";
+
 
 
 			read_key<size_t>("nchann", &nchann, config["options"], &nchann);
 			read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
+			read_key<double>("bl_window", &bl_window, config["options"]);
+			read_key<double>("threshold", &threshold, config["options"]);
 
 			load_mask(profile, config);
 
 			if (ddtype == "incoherent")
 			{
-				profile.dedisperse_incoherent_search(hdr->dm, nchann);
+				id = profile.dedisperse_incoherent_search(hdr->dm, nchann, bl_window, threshold);
 			}
 			else if (ddtype == "coherent")
 			{
+				id = profile.dedisperse_coherent_search(hdr->dm, nchann, bl_window, threshold);
 			}
 			else
 			{
 				throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
 			}
+
+			if (id != "") fs::rename(output_dir + id, output_dir + new_filename);
 		}
 		else
 		{
