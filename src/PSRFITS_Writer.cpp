@@ -522,7 +522,7 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, double *mask,
 
 
 	long nsubint = nstot / (nsblk*nbits/8);
-	if ((nstot/nchan/npol) % (nsblk*nbits/8) != 0)
+	if (nstot % (nsblk*nbits/8) != 0)
 		nsubint += 1;
 
     // Fixed parameters for search-mode

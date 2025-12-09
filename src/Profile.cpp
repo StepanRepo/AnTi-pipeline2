@@ -484,6 +484,7 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 
 		if (buf_max < obs_window)
 			break; // EOF is reached
+				   //
 	
 		shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
 
@@ -667,7 +668,13 @@ std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann, doub
 		shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
 
 		for (size_t t = 0; t < N; ++t) 
+		{
+			if (mask)
+			{
+				math::vec_prod(pre+t*nchann, mask, nchann);
+			}
 			sum_dm0[t] = math::mean(pre + t*nchann, nchann);
+		}
 
 		for (size_t t = 0; t < N; ++t) 
 			sum_dm1[t] = math::mean(post + t*nchann, nchann);
@@ -1446,6 +1453,7 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 	// go to the beginning of the file,
 	// remembering current position
 	std::streampos current = reader->file.tellg();
+
 	reader->reset();
 
 	size_t filled = 0;
@@ -1454,16 +1462,21 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 	size_t counter = 0;
 
 	// ===== Kurtosis calculation ===== 
-	double* sum1 = new double[nchann];
-	double* sum2 = new double[nchann];
-	double* sum4 = new double[nchann];
+	// G. M. Nita and D. E. Gary
+	// The generalized spectral kurtosis estimator
+	// Mon. Not. R. Astron. Soc. 406, L60–L64 (2010) 
+	// doi:10.1111/j.1745-3933.2010.00882.x
+	
+	// State per channel
+	fr = new double[nchann];
+	mask = new double[nchann];
+	double* M2 = new double[nchann];
+	double* M4 = new double[nchann];
 	double* slice;
+	double n;
 
-	std::fill(fr, fr + nchann, 0.0);
-	std::fill(sum1, sum1 + nchann, 0.0);
-	std::fill(sum2, sum2 + nchann, 0.0);
-	std::fill(sum4, sum4 + nchann, 0.0);
-
+	std::fill(M2, M2 + nchann, 0.0);
+	std::fill(M4, M4 + nchann, 0.0);
 
 	while(true)
 	{
@@ -1475,22 +1488,16 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 		{
 			slice = buff + i*nchann;
 
-			math::vec_add(fr, buff + i*nchann, nchann);
-			math::vec_add(sum1, slice, nchann);
-
+			math::vec_add(M2, slice, nchann);
 			math::vec_prod(slice, slice, nchann);
-			math::vec_add(sum2, slice, nchann);
-
-			math::vec_prod(slice, slice, nchann);
-			math::vec_add(sum4, slice, nchann);
+			math::vec_add(M4, slice, nchann);
 
 
 			counter += 1;
-
 			if (counter > max_len && max_len > 0) break;
 
 			std::cout << "\r\033[K"; // move to the beginning of the line and clear the line
-			std::cout << "steps: " << i << std::flush;
+			std::cout << "steps: " << counter << std::flush;
 		}
 
 		buf_pos += filled;
@@ -1498,39 +1505,21 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 	}
 	std::cout << std::endl;
 
-	// m1, m2, m4
-	for (size_t i = 0; i < nchann; ++i)
-		sum1[i] = sum1[i] / double(counter);
+	n = double(counter);
+	math::vec_copy(fr, M2, nchann);
+	
+	math::vec_prod(M2, M2, nchann);
+	math::vec_div(M4, M2, nchann);
+	math::vec_scale(M4, n, nchann);
+	math::vec_sub(M4, 1.0, nchann);
+	math::vec_scale(M4, (n+1.0) / (n-1.0), nchann);
+	math::vec_sub(M4, 1.0, nchann); // to shift mean towards zero
 
-	for (size_t i = 0; i < nchann; ++i)
-		sum2[i] = sum2[i] / double(counter);
-
-	for (size_t i = 0; i < nchann; ++i)
-		sum4[i] = sum4[i] / double(counter);
-
-	// sigma^2
-	math::vec_prod(sum1, sum1, nchann);
-	math::vec_sub(sum2, sum1, nchann);
-
-
-	for (size_t i = 0; i < nchann; ++i)
-	{
-		if (sum2[i] > 0.0)
-			sum4[i] = sum4[i] / (sum2[i] * sum2[i]) - 3.0;
-		else
-			sum4[i] = 0.0;
-	}
-
-	double cou = counter;
-	if (counter > 3)
-	{
-		for (size_t i = 0; i < nchann; ++i)
-			sum4[i] = (cou - 1) / ((cou - 2)*(cou - 3)) * ((cou + 1)*sum4[i] + 6);
-	}
-
-	std::ofstream test(output_dir + "test.bin");
-	test.write((char*) sum4, nchann*sizeof(double));
-	test.close();
+	/*
+	* std::ofstream test(output_dir + "test.bin");
+	* test.write((char*) M4, sizeof(double)*nchann);
+	* test.close();
+	*/
 	// ===== Kurtosis calculation ===== 
 
 
@@ -1538,46 +1527,26 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 	
 
 	// ===== Filtration section ===== 
-	
-
-	bool *filt = nullptr;
-	double *temp = nullptr;
-	filt = new bool[nchann];
-	temp = new double[nchann];
-
-	// log the bandpass to stabilize the algotithm
+	 
+	// Regect faint tails of the bandpass
+	// and kurtosis deviant points 
+	// (expected mean of M4 is 0, std is sqrt(4/n))
 	double mean_sens = math::mean(fr, nchann);
+	double tail_reg = tail_threshold * mean_sens;
+	double kurt_reg = sig_threshold * std::sqrt(4.0/n);
 	for (size_t i = 0; i < nchann; ++i)
 	{
-		if (filt[i] && fr[i] > tail_threshold * mean_sens)
-			temp[i] = std::log(fr[i]); 
-		else
-			temp[i] = 0.0;
-	}
-
-
-
-	// Find the difference between neighboring elements of an array
-	// (function returns mask[0] = temp[0])
-	std::adjacent_difference(temp, temp + nchann, mask);
-
-
-	mask[0] = 0.0; 
-	math::sigmaclip(mask, filt, nchann, sig_threshold);
-
-	// finilize the rejection by cutting the tails 
-	// where the sensitivity is low
-	for (size_t i = 0; i < nchann; ++i)
-	{
-		if (filt[i] && fr[i] > tail_threshold * mean_sens)
-			mask[i] = 1/fr[i];
+		if (fr[i] > tail_reg && std::abs(M4[i]) < kurt_reg)
+			mask[i] = 1.0 / fr[i];
 		else
 			mask[i] = 0.0;
 	}
 
+	// ===== Filtration section ===== 
 
 
 
+	// ===== Final section ===== 
 	// Normilize mask according to the PSRFITS standard
 	double max = *std::max_element(mask, mask + nchann);
 	double min = *std::min_element(mask, mask + nchann);
@@ -1590,15 +1559,9 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 	reader->reset();
 	reader->file.seekg(current, std::ios::beg);
 
-	delete[] temp;
-	delete[] filt;
-	delete[] sum1;
-	delete[] sum2;
-	delete[] sum4;
-	fftw_free(buff);
-	temp = nullptr;
-	filt = nullptr;
-	buff = nullptr;
+    delete[] M2;
+    delete[] M4;
+	// ===== Filtration section ===== 
 
 	std::cout << "Mask created" << std::endl;
 }

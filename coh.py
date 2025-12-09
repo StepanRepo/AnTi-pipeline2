@@ -52,30 +52,5 @@ if __name__ == "__main__":
         #plt.ylim(-5, 40)
 
 
-#        P = 0.71446991958999994665
-#        obs_window = int(P*1e3 / tau);
-#        int_prf = np.zeros(obs_window)
-#        skip = 0
-#        summed = 0
-#
-#        plt.figure()
-#        for i in range(int(t[-1]*1e-3 / P)):
-#            print(f"rev: {i}")
-#            skip = int(i*(P*1e3/tau - obs_window) + .5)
-#            temp = data[i*obs_window + skip: (i+1)*obs_window + skip]
-#            int_prf += temp
-#
-#            plt.plot(t[:obs_window], temp, label = f"{i}")
-#            #plt.ylim(1.850, 1.950)
-#
-#            summed += 1
-#
-#        #plt.legend()
-#
-#        int_prf = int_prf/summed
-#
-#        plt.figure()
-#        plt.plot(t[:obs_window], int_prf)
-#        #plt.ylim(1.850, 1.950)
 
     save_image("plot.pdf")

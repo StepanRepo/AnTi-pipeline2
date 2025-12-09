@@ -5,13 +5,13 @@ general:
   parfile: "0329.par"
   site: "PO"
   verbose: 1
-  buf_size: 10
+  buf_size: 2
 
-  t0: 479.0
-  t1: 480.0
+  #t0: 0.0
+  #t1: 5.0
   
-  save_raw: true
-  save_dyn: false
+  save_raw: false
+  save_dyn: true
   save_sum: false
 
 
@@ -23,16 +23,16 @@ options:
   #t2pred: "t2pred.dat"
 
   #nchann: 33554432
-  nchann: 2048
+  nchann: 262144
   #nchann: 512
 
   bl_window: 100.0e-6
-  threshold: 20.0
+  threshold: 10.0
 
-  filter: true
-  tail_threshold: .5    
-  std_threshold: 3.0
-  max_len: 1000
+  filter: false
+  tail_threshold: .0    
+  std_threshold: 5.0
+  max_len: 0
 
   
 # Owerwrite files' headers
@@ -46,5 +46,8 @@ advanced:
   dm: 56.7712
 
 files:
-  - rup103_bv_055-0550_ch01.vdif
-  #- rup103_bv_055-0612_ch01.vdif_147601.vdif
+  #- 010818_0329+54_00adc
+  - Crab_pulse/r6326e_sw_326-1702_ch01.vdif_7195.vdif
+  #- Crab_pulse/r6326e_zv_326-1702_ch01.vdif_7194.vdif
+  #- Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif
+

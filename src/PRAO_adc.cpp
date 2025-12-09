@@ -446,6 +446,7 @@ void PRAO_adc::skip(double sec)
 	data_start_pos = file.tellg(); // Update effective start
 }	
 
+
 double PRAO_adc::point2time(size_t point) 
 {
 	return header.tau*1.0e-3 * static_cast<double> (point);

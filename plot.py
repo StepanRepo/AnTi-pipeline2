@@ -9,7 +9,7 @@ from tqdm import tqdm
 import astropy.units as u
 from astropy.time import Time
 from astropy.io import fits
-from scipy.stats import sigmaclip
+from scipy.stats import sigmaclip, kurtosis, kurtosistest
 
 def bin_time(data, bin_size):
     T, F = data.shape
@@ -175,7 +175,7 @@ if __name__ == "__main__":
     for filename in path.glob("*.fits"):
         print(f"Processing {filename.stem}")
 
-        binning = 2*8
+        binning = 2**0
 
         data_2d, freqs, tl = read(filename)
         data_2d = data_2d.T
@@ -219,7 +219,23 @@ if __name__ == "__main__":
                 if sig > 10:
                     break
 
+            n = data_2d.shape[1]
+            test = data_2d[:, :n]
+            s1 = np.sum(test, axis = 1)
+            s2 = np.sum(test**2, axis = 1)
+            kurt = (n * s2/(s1**2) - 1.0) * (n+1.0) / (n-1.0) - 1
+            dev = np.sqrt(4/n)
 
+            _, low, up = sigmaclip(kurt, 3, 3)
+            print(data_2d.shape)
+
+            mask = np.abs(kurt) < 3*dev
+            data_2d[~mask, :] = np.nan
+
+            plt.figure()
+            plt.plot(np.log10(np.abs(kurt)))
+            kurt[~mask] = np.nan
+            plt.plot(np.log10(np.abs(kurt)))
 
 
             ax[0, 0].imshow(data_2d, 
@@ -229,15 +245,20 @@ if __name__ == "__main__":
                             extent = extent,
                             vmin = lower,
                             vmax = upper,
-                            interpolation = "none",
+                            #interpolation = "none",
                             )
-
             ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))
 
 
             ax[0, 1].set_xscale("log")
             ax[0, 1].plot(fr, freqs)
             ax[0, 1].set_ylim(freqs[0].to_value(u.MHz), freqs[-1].to_value(u.MHz))
+
+            fr[~mask] = np.nan
+            ax[0, 1].plot(fr, freqs)
+
+
+
 
             #clipped, l, u = sigmaclip(np.log(fr[fr>0]), 3, 3)
             #mask = (np.log(fr) > l) & (np.log(fr) < u)

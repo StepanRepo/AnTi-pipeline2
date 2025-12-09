@@ -16,6 +16,19 @@ namespace math
     void vec_prod(double* a, double* b, size_t n);
     void vec_div (double* a, double* b, size_t n);
 
+    void vec_add (double* a, double b, size_t n);
+    void vec_sub (double* a, double b, size_t n);
+    void vec_prod(double* a, double b, size_t n);
+    void vec_div (double* a, double b, size_t n);
+    void vec_scale (double* a, double b, size_t n);
+
+    void vec_add  (double* c, double* a, double* b, size_t n);
+    void vec_sub  (double* c, double* a, double* b, size_t n);
+    void vec_prod (double* c, double* a, double* b, size_t n);
+    void vec_div  (double* c, double* a, double* b, size_t n);
+
+    void vec_copy  (double* dst, double* src, size_t n);
+
     // --- Statistics ---
     double mean(double* a, size_t n);
     double median(double* a, size_t n);

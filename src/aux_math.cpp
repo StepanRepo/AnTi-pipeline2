@@ -37,6 +37,56 @@ namespace math
 		MapType(a, n) /= ConstMapType(b, n);
 	}
 
+	void vec_add(double* a, double b, size_t n) 
+	{
+		MapType(a, n) += b;
+	}
+
+	void vec_sub(double* a, double b, size_t n) 
+	{
+		MapType(a, n) -= b;
+	}
+
+	void vec_prod(double* a, double b, size_t n) 
+	{
+		MapType(a, n) *= b;
+	}
+
+	void vec_div(double* a, double b, size_t n) 
+	{
+		MapType(a, n) /= b;
+	}
+
+	void vec_scale(double* a, double b, size_t n) 
+	{
+		MapType(a, n) *= b;
+	}
+
+	void vec_add(double* c, double* a, double* b, size_t n) 
+	{
+		MapType(c, n) = ConstMapType(a, n) + ConstMapType(b, n);
+	}
+
+	void vec_sub(double* c, double* a, double* b, size_t n) 
+	{
+		MapType(c, n) = ConstMapType(a, n) - ConstMapType(b, n);
+	}
+
+	void vec_prod(double* c, double* a, double* b, size_t n) 
+	{
+		MapType(c, n) = ConstMapType(a, n) * ConstMapType(b, n);
+	}
+
+	void vec_div(double* c, double* a, double* b, size_t n) 
+	{
+		MapType(c, n) = ConstMapType(a, n) / ConstMapType(b, n);
+	}
+
+    void vec_copy  (double* dst, double* src, size_t n)
+	{
+		std::memcpy(dst, src, sizeof(double)*n);
+	}
+
 	// ------------------------------------------------------------
 	// 2. Statistics
 	// ------------------------------------------------------------
