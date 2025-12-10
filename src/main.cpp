@@ -12,6 +12,7 @@
 
 
 #include "Profile.h" 
+#include "aux_math.h" 
 
 namespace fs = std::filesystem;
 
@@ -109,12 +110,14 @@ void load_mask(Profile &profile, const YAML::Node &config)
 	std::string mask_file = "";
 	double std_threshold, tail_threshold;
 	size_t nchann = 0;
+	size_t downsample = 0;
 	size_t max_len = 0;
 	bool filter = false;
 
 	read_key<size_t>("nchann", &nchann, config["options"]);
 	read_key<size_t>("max_len", &max_len, config["options"], &max_len);
-	read_key<std::string>("mask", &mask_file, config["options"], &mask_file);
+	read_key<size_t>("downsample", &downsample, config["options"], &downsample);
+	//read_key<std::string>("mask", &mask_file, config["options"], &mask_file);
 	read_key<bool>("filter", &filter, config["options"], &filter);
 
 
@@ -123,7 +126,10 @@ void load_mask(Profile &profile, const YAML::Node &config)
 		read_key<double>("tail_threshold", &tail_threshold, config["options"]);
 		read_key<double>("std_threshold",   &std_threshold, config["options"]);
 
-		profile.create_mask(nchann, std_threshold, tail_threshold, max_len);
+		if (downsample > 0)
+			profile.create_mask(nchann, std_threshold, tail_threshold, max_len, downsample);
+		else
+			profile.create_mask(nchann, std_threshold, tail_threshold, max_len);
 	}
 }
 
@@ -351,6 +357,17 @@ int main()
 			read_key<double>("bl_window", &bl_window, config["options"]);
 			read_key<double>("threshold", &threshold, config["options"]);
 
+			// Prepare kernel
+			double* ker = new double[nchann];
+			std::fill(ker, ker + nchann, 0);
+
+			double fwhm = 100e-6;
+			double tau = 2.0/(hdr->sampling*1.0e6);
+
+			size_t n = size_t((5.0*fwhm)/tau) + 1;
+			math::gaussian_kernel(ker, n, fwhm/tau);
+
+			// Prepare mask
 			load_mask(profile, config);
 
 			if (ddtype == "incoherent")
@@ -359,7 +376,7 @@ int main()
 			}
 			else if (ddtype == "coherent")
 			{
-				id = profile.dedisperse_coherent_search(hdr->dm, nchann, bl_window, threshold);
+				id = profile.dedisperse_coherent_search(hdr->dm, nchann, bl_window, threshold, ker);
 			}
 			else
 			{

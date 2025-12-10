@@ -1,38 +1,39 @@
 general:
-  mode: "stream"
+  mode: "search"
   input_dir: "data"
   output_dir: "data"
   parfile: "0329.par"
   site: "PO"
   verbose: 1
-  buf_size: 2
+  buf_size: 10
 
-  #t0: 0.0
-  #t1: 5.0
+  t0: 147.570
+  t1: 147.610
   
   save_raw: false
-  save_dyn: true
-  save_sum: false
+  save_dyn: false
+  save_sum: true
 
 
 
 options:
 
-  ddtype: "incoherent"
+  ddtype: "coherent"
 
   #t2pred: "t2pred.dat"
 
-  #nchann: 33554432
-  nchann: 262144
+  nchann: 33554432
+  #nchann: 4096
   #nchann: 512
 
-  bl_window: 100.0e-6
+  bl_window: 200.0e-6
   threshold: 10.0
 
-  filter: false
-  tail_threshold: .0    
-  std_threshold: 5.0
-  max_len: 0
+  filter: true
+  tail_threshold: .4
+  std_threshold: 15.0
+  downsample: 1024
+  max_len: 100000
 
   
 # Owerwrite files' headers
@@ -46,8 +47,10 @@ advanced:
   dm: 56.7712
 
 files:
+  #- wideband_1024_2048.vdif
+  - rup103_bv_055-0612_ch01.vdif
   #- 010818_0329+54_00adc
-  - Crab_pulse/r6326e_sw_326-1702_ch01.vdif_7195.vdif
+  #- Crab_pulse/r6326e_sw_326-1702_ch01.vdif_7195.vdif
   #- Crab_pulse/r6326e_zv_326-1702_ch01.vdif_7194.vdif
   #- Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif
 

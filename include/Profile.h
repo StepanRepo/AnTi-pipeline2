@@ -17,6 +17,8 @@ class Profile
 		void check_incoherent(size_t nchann);
 		void check_coherent();
 
+		void shift_window_coherent(fftw_plan fft, fftw_plan ifft, fftw_complex* f_space, fftw_complex* dphase, size_t nchann);
+
 		void matched_filter(double* data, size_t N, double threshold, std::vector<size_t>& pos, std::vector<double>& power);
 		std::string csv_result (size_t left, size_t right, double power, size_t n_DM, std::vector<size_t>& pulses_dm0, std::vector<double>& power_dm0) const;
 
@@ -58,9 +60,9 @@ class Profile
 		std::string dedisperse_coherent_stream (double DM, size_t nchann);
 
 		std::string dedisperse_incoherent_search (double DM, size_t nchann, double BL_window = 10e-6, double threshold = 5.0);
-		std::string dedisperse_coherent_search   (double DM, size_t nchann, double BL_window = 10e-6, double threshold = 5.0);
+		std::string dedisperse_coherent_search   (double DM, size_t nchann, double BL_window = 10e-6, double threshold = 5.0, double* ker_t = nullptr);
 
-		void create_mask(size_t nchann, double sig_threshold, double tail_threshold, size_t max_len = 0);
+		void create_mask(size_t nchann, double sig_threshold, double tail_threshold, size_t max_len = 0, size_t downsample = 0);
 
 		void fold_dyn(double P, size_t nchann);
 		void fold_dyn(std::string pred_file, size_t nchann);

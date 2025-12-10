@@ -674,7 +674,7 @@ bool PSRFITS_Writer::append_subint_search(double* data_double, double *mask, con
 	size_t nstot = nbin;
 
 	long nsubint = nstot / nsblk;
-	if ((nstot/nchan/npol) % nsblk != 0)
+	if (nstot % nsblk != 0)
 		nsubint += 1;
 
     // Fixed parameters for search-mode

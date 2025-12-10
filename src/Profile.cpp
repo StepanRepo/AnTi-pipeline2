@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <numeric>
 
+#include <ctime>
+
 #include "tempo2.h"
 #include"tempo2pred.h"  // API for TEMPO2 prediction files
 
@@ -92,22 +94,25 @@ void shift_window_incoherent(const double* in, double* out, const int* shift, co
 }
 
 
-void shift_window_coherent(fftw_plan fft, fftw_plan ifft, fftw_complex* f_space, fftw_complex* dphase, size_t nchann)
+void Profile::shift_window_coherent(fftw_plan fft, fftw_plan ifft, fftw_complex* f_space, fftw_complex* dphase, size_t nchann)
 {
-	double re, im;
+ 	clock_t t0, t1;;
+	t0 = std::clock();
+
 	fftw_execute(fft);
+		t1 = std::clock();
+		std::cout << float(t1 - t0) / CLOCKS_PER_SEC << std::endl;
+		t0 = t1;
 
-	#pragma omp simd
-	for (size_t i = 0; i < nchann; ++i)
-	{
-		re = f_space[i][0];
-		im = f_space[i][1];
 
-		f_space[i][0] = re*dphase[i][0] - im*dphase[i][1];
-		f_space[i][1] = re*dphase[i][1] + im*dphase[i][0];
-	}
-
+	math::vec_prod(f_space, dphase, nchann);
+		t1 = std::clock();
+		std::cout << float(t1 - t0) / CLOCKS_PER_SEC << std::endl;
+		t0 = t1;
 	fftw_execute(ifft);
+		t1 = std::clock();
+		std::cout << float(t1 - t0) / CLOCKS_PER_SEC << std::endl;
+		t0 = t1;
 }
 
 void detect(fftw_complex* t_space, double* sum, size_t nchann)
@@ -127,7 +132,6 @@ void detect(fftw_complex* t_space, double* sum, size_t nchann)
 void Profile::matched_filter(double* data, size_t N, double threshold, std::vector<size_t>& pos, std::vector<double>& power)
 {
     thread_local static std::vector<signed char> mask, edges;
-
 
     if (mask.size() != N) mask.resize(N);
     if (edges.size() != N) edges.resize(N);
@@ -149,7 +153,7 @@ void Profile::matched_filter(double* data, size_t N, double threshold, std::vect
 	}
 
 	if (rises.size() > falls.size())
-		rises.erase(rises.end());
+		rises.pop_back();
 
 	if (rises.size() < falls.size())
 		falls.erase(falls.begin());
@@ -164,6 +168,7 @@ void Profile::matched_filter(double* data, size_t N, double threshold, std::vect
 		b = falls[i];
 		power[i] = math::mean(data + a, b-a);
 	}
+
 
 	size_t counter = 0;
 	for (size_t i = 0; i < rises.size(); ++i)
@@ -650,6 +655,7 @@ std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann, doub
 	size_t N = 0;
 
 	BL_window = size_t(BL_window_s/hdr->tau * 1.0e3);
+	size_t n_found = 0;
 
 	while(true && !eof)
 	{
@@ -684,20 +690,18 @@ std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann, doub
 		math::subtract_baseline(sum_dm0, N, BL_window);
 		math::subtract_baseline(sum_dm1, N, BL_window);
 
-		/*
-		 *std::ofstream test0(output_dir + "test0.bin");
-		 *test0.write((char*) sum_dm0, N*sizeof(double));
-		 *test0.close();
-		 *std::ofstream test1(output_dir + "test1.bin");
-		 *test1.write((char*) sum_dm1, N*sizeof(double));
-		 *test1.close();
-		 *
-		 */
+		
+		std::ofstream test0(output_dir + "test0.bin");
+		test0.write((char*) sum_dm0, N*sizeof(double));
+		test0.close();
+		std::ofstream test1(output_dir + "test1.bin");
+		test1.write((char*) sum_dm1, N*sizeof(double));
+		test1.close();
+		
 
 
 		matched_filter(sum_dm0, N, threshold, pulses_dm0, power_dm0);
 		matched_filter(sum_dm1, N, threshold, pulses_dm1, power_dm1);
-
 
 		// save info of the search
 		for(size_t i = 0; i < power_dm1.size(); ++i)
@@ -706,10 +710,15 @@ std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann, doub
 
 		// save profiles of the search
 		is_pulse = pulses_dm1.size() > 0;
+		is_pulse = true;
+
+		if (is_pulse)
+			n_found ++;
+
 
 		if (save_raw && is_pulse) 
 		{
-			PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename);
+			PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename + "_" + std::to_string(n_found));
 			writer1.createPrimaryHDU("SEARCH", hdr);
 			writer1.append_subint_search(
 					pre, nullptr,
@@ -719,7 +728,7 @@ std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann, doub
 
 		if (save_dyn && is_pulse) 
 		{
-			PSRFITS_Writer writer1(output_dir + "dyn_" + reader->filename);
+			PSRFITS_Writer writer1(output_dir + "dyn_" + reader->filename + "_" + std::to_string(n_found));
 			writer1.createPrimaryHDU("SEARCH", hdr);
 			writer1.append_subint_search(
 					post, nullptr,
@@ -729,14 +738,14 @@ std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann, doub
 
 		if (save_sum && is_pulse) 
 		{
-			PSRFITS_Writer writer0(output_dir + "sum0_" + reader->filename);
+			PSRFITS_Writer writer0(output_dir + "sum0_" + reader->filename + "_" + std::to_string(n_found));
 			writer0.createPrimaryHDU("SEARCH", hdr);
 			writer0.append_subint_search(
 					sum_dm0, nullptr,
 					buf_max - n_DM, 1, 1, 
 					0, fmin, fmax, tau);
 
-			PSRFITS_Writer writer1(output_dir + "sum1_" + reader->filename);
+			PSRFITS_Writer writer1(output_dir + "sum1_" + reader->filename + "_" + std::to_string(n_found));
 			writer1.createPrimaryHDU("SEARCH", hdr);
 			writer1.append_subint_search(
 					sum_dm1, nullptr,
@@ -799,14 +808,15 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	 * for the processed chunk. It is used for debugging
 	 ******************************************
 	 */
-	//fftw_plan p;
-	//fftw_complex *f_small, *t_small;
-	//size_t freq_num = 2048;
-	//double *spec;
-	//f_small = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (freq_num)));
-	//t_small = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (freq_num)));
-	//spec = (double*)(fftw_malloc(sizeof(double) * (freq_num)));
-	//p  = fftw_plan_dft_1d(freq_num, t_small, f_small, FFTW_FORWARD, FFTW_ESTIMATE);
+	fftw_plan p;
+	fftw_complex *f_small, *t_small;
+	size_t freq_num = 2048;
+	double *spec;
+	f_small = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (freq_num)));
+	t_small = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (freq_num)));
+	spec = (double*)(fftw_malloc(sizeof(double) * (freq_num)));
+	p  = fftw_plan_dft_1d(freq_num, t_small, f_small, FFTW_FORWARD, FFTW_ESTIMATE);
+	std::ofstream output(output_dir + "test.bin");
 
 	fmin = hdr->fmin;
 	fmax = hdr->fmax;
@@ -825,6 +835,9 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 
 	dphase = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann)));
 	calc_shift_phase(dphase, DM, fcomp, fmin, fmax, nchann, redshift);
+
+	if (mask)
+		math::vec_prod(dphase, mask, nchann);
 
 
 	buff    = (double*) (fftw_malloc(sizeof(double) * obs_window));
@@ -855,6 +868,7 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	buf_pos = 0;
 	sumidx = 0;
 
+
 	bool eof = false;
 	while(true && !eof)
 	{
@@ -873,17 +887,17 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 
 		if (save_raw)
 			raw_output.write(reinterpret_cast<const char*>(buff + 2*n_DM),
-					2*(nchann - n_DM) * sizeof(double));
+					(buf_max - 2*n_DM) * sizeof(double));
 
 		if (save_dyn)
 			dyn_output.write(reinterpret_cast<const char*>(t_space + n_DM),
-					(nchann - n_DM) * sizeof(fftw_complex));
+					(buf_max/2 - n_DM) * sizeof(fftw_complex));
 
 		if (save_sum)
 			sum_output.write(reinterpret_cast<const char*>(sum + n_DM),
-					(nchann - n_DM) * sizeof(double));
+					(buf_max/2 - n_DM) * sizeof(double));
 
-		buf_pos = obs_window - 2*n_DM;
+		buf_pos = buf_max - 2*n_DM;
 		sumidx += buf_pos/2;
 		std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
 
@@ -894,29 +908,30 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 		 * below to use it)
 		 ******************************************
 		 */
-		//for (size_t i = 0; i < nchann/freq_num; ++i)
-		//{
-		//#pragma omp simd
-		//	for (size_t k = 0; k < freq_num; ++k)
-		//	{
-		//		t_small[k][0] = t_space[i*freq_num + k][0];
-		//		t_small[k][1] = t_space[i*freq_num + k][1];
-		//	}
+		double re, im;
+		for (size_t i = n_DM/freq_num; i < buf_max/freq_num/2; ++i)
+		{
+		#pragma omp simd
+			for (size_t k = 0; k < freq_num; ++k)
+			{
+				t_small[k][0] = t_space[i*freq_num + k][0];
+				t_small[k][1] = t_space[i*freq_num + k][1];
+			}
 
-		//	fftw_execute(p);
+			fftw_execute(p);
 
-		//#pragma omp simd
-		//	for (size_t k = 0; k < freq_num; ++k)
-		//	{
-		//		re = f_small[k][0];
-		//		im = f_small[k][1];
+		#pragma omp simd
+			for (size_t k = 0; k < freq_num; ++k)
+			{
+				re = f_small[k][0];
+				im = f_small[k][1];
 
-		//		spec[k] = re*re + im*im;
-		//	}
+				spec[k] = re*re + im*im;
+			}
 
-		//	output.write(reinterpret_cast<const char*>(spec),
-		//			(freq_num) * sizeof(double));
-		//}
+			output.write(reinterpret_cast<const char*>(spec),
+					(freq_num) * sizeof(double));
+		}
 	}
 
 
@@ -967,7 +982,7 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	return id;
 }
 
-std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double BL_window_s, double threshold)
+std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double BL_window_s, double threshold, double* ker_t)
 {
 
 	check_coherent();
@@ -983,6 +998,7 @@ std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double
 	fftw_complex* dphase;
 	fftw_complex* dphase0;
 	fftw_complex *f_space, *t_space;
+	fftw_complex *ker_f;
 	double *sum_dm0, *sum_dm1;
 	fftw_plan fft, ifft;
 
@@ -1000,8 +1016,9 @@ std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double
 	obs_window = 2*nchann;
 
 
-	dphase = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann)));
+	dphase  = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann)));
 	dphase0 = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann)));
+	ker_f   = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann)));
 	calc_shift_phase(dphase, DM, fcomp, fmin, fmax, nchann, redshift);
 
 	for (size_t i = 0; i < nchann; ++i)
@@ -1009,6 +1026,31 @@ std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double
 		dphase0[i][0] = 1.0;
 		dphase0[i][1] = 0.0;
 	}
+
+	if (mask)
+	{
+		math::vec_prod(dphase, mask, nchann);
+		math::vec_prod(dphase0, mask, nchann);
+	}
+
+	// Modify phase with convolution kernel
+	if(ker_t)
+	{
+		std::fill((double*) ker_f, ((double*) ker_f) + 2*nchann, 0.0);
+		for (size_t i = 0; i < nchann; ++i)
+			ker_f[i][0] = ker_t[i];
+
+		fft = fftw_plan_dft_1d(nchann, ker_f, ker_f, FFTW_BACKWARD, FFTW_ESTIMATE);
+		fftw_execute(fft);
+
+		math::vec_prod(dphase,  ker_f, nchann);
+		math::vec_prod(dphase0, ker_f, nchann);
+
+		delete[] ker_f;
+		ker_f = nullptr;
+	}
+
+
 
 
 	buff    = (double*) (fftw_malloc(sizeof(double) * obs_window));
@@ -1041,6 +1083,7 @@ std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double
 	size_t N = 0;
 	bool eof = false;
 	bool is_pulse = false;
+	size_t n_found = 0;
 
 	BL_window = size_t(BL_window_s/hdr->tau * 1.0e3);
 
@@ -1061,7 +1104,7 @@ std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double
 		}
 
 
-		N = buf_max - n_DM;
+		N = buf_max/2 - n_DM;
 		shift_window_coherent(fft, ifft, f_space+1, dphase0, nchann);
 		detect(t_space, sum_dm0, nchann);
 
@@ -1075,9 +1118,17 @@ std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double
 		matched_filter(sum_dm0+n_DM, N, threshold, pulses_dm0, power_dm0);
 		matched_filter(sum_dm1+n_DM, N, threshold, pulses_dm1, power_dm1);
 
+		std::ofstream test0(output_dir + "test0.bin");
+		test0.write((char*) (sum_dm0 + n_DM), N*sizeof(double));
+		test0.close();
+
+		std::ofstream test1(output_dir + "test1.bin");
+		test1.write((char*) (sum_dm1 + n_DM), N*sizeof(double));
+		test1.close();
+
 		// save info of the search
-		for(size_t i = 0; i < power_dm1.size(); ++i)
-			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], n_DM, pulses_dm0, power_dm0) << '\n';
+		//for(size_t i = 0; i < power_dm1.size(); ++i)
+		//	csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], n_DM, pulses_dm0, power_dm0) << '\n';
 
 		//for(size_t i = 0; i < power_dm0.size(); ++i)
 		//	std::cout << "dm0: " << reader->point2time(sumidx + pulses_dm0[i]) << std::endl;
@@ -1087,10 +1138,14 @@ std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double
 
 		// save profiles of the search
 		is_pulse = pulses_dm1.size() > 0;
+		is_pulse = true;
+
+		if (is_pulse)
+			n_found ++;
 
 		if (save_raw && is_pulse) 
 		{
-			PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename);
+			PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename + "_" + std::to_string(n_found));
 			writer1.createPrimaryHDU("SEARCH", hdr);
 			writer1.append_subint_search(
 					buff + 2*n_DM, nullptr,
@@ -1100,7 +1155,7 @@ std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double
 
 		if (save_dyn && is_pulse) 
 		{
-			PSRFITS_Writer writer1(output_dir + "dyn_" + reader->filename);
+			PSRFITS_Writer writer1(output_dir + "dyn_" + reader->filename + "_" + std::to_string(n_found));
 			writer1.createPrimaryHDU("SEARCH", hdr);
 			writer1.append_subint_search(
 					(double*) (t_space + n_DM), nullptr,
@@ -1110,14 +1165,14 @@ std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double
 
 		if (save_sum && is_pulse) 
 		{
-			PSRFITS_Writer writer0(output_dir + "sum0_" + reader->filename);
+			PSRFITS_Writer writer0(output_dir + "sum0_" + reader->filename + "_" + std::to_string(n_found));
 			writer0.createPrimaryHDU("SEARCH", hdr);
 			writer0.append_subint_search(
 					sum_dm0 + n_DM, nullptr,
 					N, 1, 1, 
 					0, fmin, fmax, tau);
 
-			PSRFITS_Writer writer1(output_dir + "sum1_" + reader->filename);
+			PSRFITS_Writer writer1(output_dir + "sum1_" + reader->filename + "_" + std::to_string(n_found));
 			writer1.createPrimaryHDU("SEARCH", hdr);
 			writer1.append_subint_search(
 					sum_dm1 + n_DM, nullptr,
@@ -1125,9 +1180,10 @@ std::string Profile::dedisperse_coherent_search(double DM, size_t nchann, double
 					DM, fmin, fmax, tau);
 		}
 
-		buf_pos = buf_max - n_DM;
+		buf_pos = buf_max - 2*n_DM;
 		sumidx += buf_pos/2;
 		std::cout << "t = " << reader->point2time(sumidx) << " s" << std::endl;
+
 	}
 
 
@@ -1432,13 +1488,23 @@ double Profile::get_redshift (std::string par_path, std::string site)
 	return redshift;
 }
 
-void Profile::create_mask(size_t nchann, double sig_threshold, double tail_threshold, size_t max_len)
+void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_threshold, size_t max_len, size_t downsample)
 {
 
-	if (hdr->nchann != nchann && hdr->nchann != 1)
+	if (hdr->nchann != nchann_in && hdr->nchann != 1)
         throw std::runtime_error("The signal was obtained with different number of freq channels");
 
 	std::cout << "Creating mask" << std::endl;
+
+	size_t nchann = 0;
+	if (downsample > 0)
+		nchann = downsample;
+	else
+		nchann = nchann_in;
+
+	if (nchann > nchann_in)
+		throw std::runtime_error("Downsampling may only be performed with smaller number of channels");
+
 
 	// define the mask 
 	fr = new double[nchann];
@@ -1531,9 +1597,21 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 	// Regect faint tails of the bandpass
 	// and kurtosis deviant points 
 	// (expected mean of M4 is 0, std is sqrt(4/n))
-	double mean_sens = math::mean(fr, nchann);
-	double tail_reg = tail_threshold * mean_sens;
+	//
 	double kurt_reg = sig_threshold * std::sqrt(4.0/n);
+	double sum = 0.0;
+	counter = 0;
+	for (size_t i = 0; i < nchann; ++i)
+	{
+		if (std::abs(M4[i]) < kurt_reg)
+		{
+			sum += fr[i];
+			counter += 1;
+		}
+	}
+
+	double mean_sens = sum / double(counter);
+	double tail_reg = tail_threshold * mean_sens;
 	for (size_t i = 0; i < nchann; ++i)
 	{
 		if (fr[i] > tail_reg && std::abs(M4[i]) < kurt_reg)
@@ -1543,15 +1621,62 @@ void Profile::create_mask(size_t nchann, double sig_threshold, double tail_thres
 	}
 
 	// ===== Filtration section ===== 
+	
+	// ===== Downsampling section ===== 
+	//
+	// Create a bigger mask according to the smaller one
+	// The bigger is filled by piecewise linear interpolation
+	// In case leftmost or rightmost channel of smaller mask 
+	// is zero, all according bins in the big mask are zero
+	//
+	double* mask_small = new double[nchann];
+	math::vec_copy(mask_small, mask, nchann);
+
+	delete[] mask;
+	mask = new double[nchann_in];
+
+	size_t s_n = nchann;
+	size_t b_n = nchann_in;
+	size_t start_idx = 0, end_idx = 0, bin_size = 0;
+	for (size_t i = 0; i < s_n - 1; i++) 
+	{
+		double left_val  = mask_small[i];
+		double right_val = mask_small[i + 1];
+
+		start_idx = static_cast<size_t>(i * (b_n - 1.0) / (s_n - 1.0) + .5);
+		end_idx = static_cast<size_t>((i + 1) * (b_n - 1.0) / (s_n - 1.0) + .5);
+		bin_size = end_idx - start_idx;
+
+
+		if (left_val == 0.0 || right_val == 0.0) 
+		{
+			// Set entire bin to zero
+			std::fill(mask + start_idx, mask + end_idx+1, 0.0);
+		} 
+		else 
+		{
+			// Piecewise linear interpolation
+			for (size_t j = 0; j <= bin_size; j++) 
+			{
+				double t = static_cast<double>(j) / bin_size;
+				mask[start_idx + j] = left_val * (1 - t) + right_val * t;
+			}
+		}
+	}
+	std::fill(mask + end_idx, mask + nchann_in, 0.0);
+	delete[] mask_small;
+	mask_small = nullptr;
+	// ===== Downsampling section ===== 
 
 
 
 	// ===== Final section ===== 
-	// Normilize mask according to the PSRFITS standard
-	double max = *std::max_element(mask, mask + nchann);
-	double min = *std::min_element(mask, mask + nchann);
+	// Normilize mask according to the PSRFITS standard:
+	// mask \in [0, 1]
+	double max = *std::max_element(mask, mask + nchann_in);
+	double min = *std::min_element(mask, mask + nchann_in);
 
-	for (size_t i = 0; i < nchann; ++i)
+	for (size_t i = 0; i < nchann_in; ++i)
 		mask[i] = (mask[i] - min) / (max - min);
 
 

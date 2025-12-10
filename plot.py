@@ -10,6 +10,7 @@ import astropy.units as u
 from astropy.time import Time
 from astropy.io import fits
 from scipy.stats import sigmaclip, kurtosis, kurtosistest
+from scipy import signal
 
 def bin_time(data, bin_size):
     T, F = data.shape
@@ -183,14 +184,16 @@ if __name__ == "__main__":
         tl = tl * u.s
         freqs = freqs * u.MHz
 
+        data_2d = bin_time(data_2d.T, binning).T
+        tl = tl[::binning][:data_2d.shape[1]]
+
         if (data_2d.shape[0] > 1):
-            data_2d = bin_time(data_2d.T, binning).T
-            tl = tl[::binning][:data_2d.shape[1]]
+
+            data_2d[data_2d == 0.0] = np.median(data_2d[data_2d > 0])
 
 
             nchan = data_2d.shape[0]
             fr = np.sum(data_2d, axis = 1)
-
 
 
             fig, ax = plt.subplots(2, 2, 
@@ -219,25 +222,6 @@ if __name__ == "__main__":
                 if sig > 10:
                     break
 
-            n = data_2d.shape[1]
-            test = data_2d[:, :n]
-            s1 = np.sum(test, axis = 1)
-            s2 = np.sum(test**2, axis = 1)
-            kurt = (n * s2/(s1**2) - 1.0) * (n+1.0) / (n-1.0) - 1
-            dev = np.sqrt(4/n)
-
-            _, low, up = sigmaclip(kurt, 3, 3)
-            print(data_2d.shape)
-
-            mask = np.abs(kurt) < 3*dev
-            data_2d[~mask, :] = np.nan
-
-            plt.figure()
-            plt.plot(np.log10(np.abs(kurt)))
-            kurt[~mask] = np.nan
-            plt.plot(np.log10(np.abs(kurt)))
-
-
             ax[0, 0].imshow(data_2d, 
                             origin = "lower", 
                             aspect = "auto",
@@ -253,10 +237,6 @@ if __name__ == "__main__":
             ax[0, 1].set_xscale("log")
             ax[0, 1].plot(fr, freqs)
             ax[0, 1].set_ylim(freqs[0].to_value(u.MHz), freqs[-1].to_value(u.MHz))
-
-            fr[~mask] = np.nan
-            ax[0, 1].plot(fr, freqs)
-
 
 
 
@@ -278,15 +258,19 @@ if __name__ == "__main__":
         #ax[0, 0].set_xlim(280, 380)
         else:
 
+
             fig, ax = plt.subplots(1, 1)
             fig.suptitle(filename.stem)
+    
+            #M = (10e-6 * u.s) / (tl[1] - tl[0])
+            #M = int(M.to_value(u.dimensionless_unscaled))
+            #data_2d[0] = signal.fftconvolve(data_2d[0], np.ones(M)/M, "same")
 
             val = u.ms
 
             ax.plot(tl.to(val), data_2d[0])
             ax.set_xlabel(f"Time, {val}")
             ax.set_ylabel("Integal Intensity")
-            #ax.set_ylim(-10, 50)
 
             tmax = tl[np.argmax(data_2d[0])]
             dt = 5*u.us

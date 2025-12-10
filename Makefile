@@ -11,7 +11,7 @@ CXX = g++
 # -O3: Optimize for speed (use -O0 for debugging)
 # -g: Include debugging symbols (remove for release build)
 # -fopenmp: Enable to use OpenMP routines
-CXXFLAGS = -std=c++17 -O3 -fopenmp -march=native
+CXXFLAGS = -std=c++17 -fopenmp -O3 -march=native -ffast-math
 DEBUG = -g -Wall -Wextra #-fopt-info 
 
 CXXFLAGS += $(DEBUG)
@@ -56,6 +56,7 @@ all: $(TARGET)
 # It depends on all the object files $(OBJECTS)
 $(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(RPATHS) $(OBJECTS) $(LIBS)  -o $@ 
+
 
 # --- Compilation Rule (Pattern Rule) ---
 # This pattern rule tells make how to compile any .cpp file into a .o file

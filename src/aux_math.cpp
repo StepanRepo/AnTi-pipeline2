@@ -32,6 +32,30 @@ namespace math
 		MapType(a, n) *= ConstMapType(b, n);
 	}
 
+	void vec_prod(fftw_complex* __restrict__ a, fftw_complex* __restrict__ b, size_t n) 
+	{
+		double re, im;
+		#pragma omp simd
+		for (size_t i = 0; i < n; ++i)
+		{
+			re = a[i][0];
+			im = a[i][1];
+
+			a[i][0] = re*b[i][0] - im*b[i][1];
+			a[i][1] = re*b[i][1] + im*b[i][0];
+		}
+	}
+
+	void vec_prod(fftw_complex* __restrict__ a, double* __restrict__ b, size_t n) 
+	{
+		#pragma omp simd
+		for (size_t i = 0; i < n; ++i)
+		{
+			a[i][0] = a[i][0] * b[i];
+			a[i][1] = a[i][1] * b[i];
+		}
+	}
+
 	void vec_div(double* a, double* b, size_t n) 
 	{
 		MapType(a, n) /= ConstMapType(b, n);
@@ -271,13 +295,14 @@ namespace math
 
 		// Precompute initial sum and sum of squares
 		double sum = 0.0, sum_sq = 0.0;
-		for (size_t i = 0; i < window_size; ++i) {
+		for (size_t i = 0; i < window_size; ++i) 
+		{
 			sum += window[i];
 			sum_sq += window[i] * window[i];
 		}
 
 		// Process each point with sliding window
-		for (size_t i = 0; i < n; ++i) 
+		for (size_t i = window_size/2; i < n; ++i) 
 		{
 			// Compute mean and std for current window
 			double mean = sum / window_size;
@@ -287,13 +312,15 @@ namespace math
 			if (std == 0.0) std = 1.0;  // Avoid division by zero
 
 			// Normalize current point: (x - mean) / std
-			data[i] = (data[i] - mean) / std;
+			data[i-window_size/2] = (data[i-window_size/2] - mean);// / std;
+
 
 			// Update window for next iteration (if not last point)
 			if (i < n - 1) 
 			{
 				double new_val = (i + 1 < n) ? data[i + 1] : data[n - 1];
-				if (new_val - mean > 3.0*std) continue;
+				//if (std::abs(new_val - mean) > 5.0*std) continue;
+
 
 				// Remove oldest value (at head)
 				double old_val = window[head];
@@ -303,6 +330,8 @@ namespace math
 				// Add new value (repeat last value at boundary)
 				window[head] = new_val;
 				sum += new_val;
+
+				if (new_val == 0.0) break;
 				sum_sq += new_val * new_val;
 
 				// Advance head (circular)
@@ -310,7 +339,82 @@ namespace math
 			}
 		}
 
+		if (window[head] != 0.0)
+			for (size_t i = n - window_size/2; i < n; ++i) 
+				data[i] = (data[i] - sum/window_size);
+
+
+
+		for (size_t i = 0; i < window_size; ++i) {
+			window[i] = data[i];
+		}
+		sum = 0.0;
+		sum_sq = 0.0;
+		for (size_t i = 0; i < window_size; ++i) 
+		{
+			sum += window[i];
+			sum_sq += window[i] * window[i];
+		}
+
+		// Process each point with sliding window
+		for (size_t i = window_size/2; i < n; ++i) 
+		{
+			// Compute mean and std for current window
+			double mean = sum / window_size;
+			double variance = (sum_sq - sum * mean) / (window_size - 1);
+			double std = std::sqrt(variance);
+
+			if (std == 0.0) std = 1.0;  // Avoid division by zero
+
+			// Normalize current point: (x - mean) / std
+			data[i-window_size/2] = data[i-window_size/2] / std;
+
+
+			// Update window for next iteration (if not last point)
+			if (i < n - 1) 
+			{
+				double new_val = (i + 1 < n) ? data[i + 1] : data[n - 1];
+				if (std::abs(new_val)/std < 5.0e-1 ) continue;
+
+
+				// Remove oldest value (at head)
+				double old_val = window[head];
+				sum -= old_val;
+				sum_sq -= old_val * old_val;
+
+				// Add new value (repeat last value at boundary)
+				window[head] = new_val;
+				sum += new_val;
+
+				if (new_val != 0.0)
+				sum_sq += new_val * new_val;
+
+				// Advance head (circular)
+				head = (head + 1) % window_size;
+			}
+		}
+
+		double variance = (sum_sq) / (window_size - 1);
+		double std = std::sqrt(variance);
+		for (size_t i = n - window_size/2; i < n; ++i) 
+			data[i] = data[i]/std;// / std;
+
 		delete[] window;
+	}
+
+	void gaussian_kernel(double* x, size_t n, double fwhm)
+	{
+		double sigma = fwhm / 2.355;
+		double t0 = double(n/2);
+		double sum_sq = 0;
+
+		for (size_t i = 0; i < n; ++i)
+			x[i] = std::exp(-.5 * (double(i) - t0) * (double(i) - t0) / sigma / sigma); 
+
+		for (size_t i = 0; i < n; ++i)
+			sum_sq += x[i]*x[i];
+
+		vec_scale(x, 1.0/sum_sq, n);
 	}
 
 
