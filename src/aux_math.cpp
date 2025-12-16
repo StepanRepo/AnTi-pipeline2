@@ -290,7 +290,7 @@ namespace math
 
 		// Initialize first window: copy first 'window_size' elements
 		for (size_t i = 0; i < window_size; ++i) {
-			window[i] = data[i];
+			window[i] = data[(int(i) - window_size/2) % n];
 		}
 
 		// Precompute initial sum and sum of squares
@@ -344,9 +344,8 @@ namespace math
 				data[i] = (data[i] - sum/window_size);
 
 
-
 		for (size_t i = 0; i < window_size; ++i) {
-			window[i] = data[i];
+			window[i] = data[(int(i) - window_size/2) % n];
 		}
 		sum = 0.0;
 		sum_sq = 0.0;
@@ -417,6 +416,48 @@ namespace math
 		vec_scale(x, 1.0/sum_sq, n);
 	}
 
+	void box_conv(double* x, double* out, size_t win, size_t n)
+	{
+		if (n == 0 || win == 0 || win > n) return;
+
+		// Circular buffer for current window
+		double* window = new double[win];
+		size_t head = 0;  // Next write position in circular buffer
+		double mean, sum;
+		double old_val, new_val;
+
+		// Initialize first window: copy first 'win' elements
+		for (int i = -int(win/2); i < int(win/2); ++i) 
+		{
+			window[i + win/2] = x[i % n];
+		}
+
+		// Precompute initial sum and sum of squares
+		sum = std::accumulate(window, window + win, 0.0);
+
+		// Process each point with sliding window
+		for (size_t i = 0; i < n; ++i) 
+		{
+			// Compute mean and std for current window
+			mean = sum / win;
+			out[i] = mean;
+
+
+			// Update window for next iteration (if not last point)
+			new_val = x[(i - win/2) % n];
+			old_val = window[head];
+
+			// Remove oldest value (at head)
+			sum = sum - old_val + new_val;
+
+			// Add new value (circular on boundaries)
+			window[head] = new_val;
+			sum += new_val;
+
+			// Advance head (circular)
+			head = (head + 1) % win;
+		}
+	}
 
 
 	// ------------------------------------------------------------

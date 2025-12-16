@@ -172,8 +172,9 @@ def read(filename):
 if __name__ == "__main__":
     path = Path(".")
     path = Path("data")
+    files = np.sort(list(path.glob("*.fits")))
 
-    for filename in path.glob("*.fits"):
+    for filename in files:
         print(f"Processing {filename.stem}")
 
         binning = 2**0

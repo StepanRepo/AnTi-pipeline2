@@ -346,7 +346,10 @@ int main()
 			size_t nchann = 0;
 			double bl_window;
 			double threshold;
+			double fwhm;
+			double* ker = nullptr;
 			std::string ddtype = "";
+			std::string conv_type = "";
 			std::string id = "";
 			std::string new_filename = filename + ".csv";
 
@@ -354,18 +357,15 @@ int main()
 
 			read_key<size_t>("nchann", &nchann, config["options"], &nchann);
 			read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
+			read_key<std::string>("conv_type", &conv_type, config["options"], &conv_type);
 			read_key<double>("bl_window", &bl_window, config["options"]);
-			read_key<double>("threshold", &threshold, config["options"]);
+			read_key<double>("search_threshold", &threshold, config["options"]);
+			read_key<double>("search_fwhm", &fwhm, config["options"]);
 
 			// Prepare kernel
-			double* ker = new double[nchann];
-			std::fill(ker, ker + nchann, 0);
-
-			double fwhm = 100e-6;
-			double tau = 2.0/(hdr->sampling*1.0e6);
-
-			size_t n = size_t((5.0*fwhm)/tau) + 1;
-			math::gaussian_kernel(ker, n, fwhm/tau);
+			if (conv_type == "gaussian")
+			{
+			}
 
 			// Prepare mask
 			load_mask(profile, config);
@@ -376,7 +376,10 @@ int main()
 			}
 			else if (ddtype == "coherent")
 			{
-				id = profile.dedisperse_coherent_search(hdr->dm, nchann, bl_window, threshold, ker);
+				id = profile.dedisperse_coherent_search(
+						hdr->dm, nchann, 
+						bl_window, threshold, 
+						conv_type, fwhm);
 			}
 			else
 			{
@@ -384,6 +387,9 @@ int main()
 			}
 
 			if (id != "") fs::rename(output_dir + id, output_dir + new_filename);
+
+			if (ker)
+				delete[] ker;
 		}
 		else
 		{

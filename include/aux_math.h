@@ -42,6 +42,7 @@ namespace math
     // --- Time-domain profile processing ---
 	void subtract_baseline(double *data, size_t n, size_t window_size);
 	void gaussian_kernel(double* x, size_t n, double fwhm);
+	void box_conv(double* x, double* out, size_t win, size_t n);
 
     // --- Freq-domain profile processing ---
 
