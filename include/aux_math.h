@@ -18,6 +18,7 @@ namespace math
 
     void vec_prod(fftw_complex* a, fftw_complex* b, size_t n);
     void vec_prod(fftw_complex* a, double* b, size_t n);
+    void vec_prod(fftw_complex* a, double b, size_t n);
 
     void vec_add (double* a, double b, size_t n);
     void vec_sub (double* a, double b, size_t n);
@@ -41,6 +42,7 @@ namespace math
 
     // --- Time-domain profile processing ---
 	void subtract_baseline(double *data, size_t n, size_t window_size);
+	void normalize_std(double *data, size_t n);
 	void gaussian_kernel(double* x, size_t n, double fwhm);
 	void box_conv(double* x, double* out, size_t win, size_t n);
 

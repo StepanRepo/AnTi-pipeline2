@@ -96,23 +96,23 @@ void shift_window_incoherent(const double* in, double* out, const int* shift, co
 
 void Profile::shift_window_coherent(fftw_plan fft, fftw_plan ifft, fftw_complex* f_space, fftw_complex* dphase, size_t nchann)
 {
- 	clock_t t0, t1;;
-	t0 = std::clock();
+ 	//clock_t t0, t1;;
+	//t0 = std::clock();
 
 	fftw_execute(fft);
-		t1 = std::clock();
-		std::cout << float(t1 - t0) / CLOCKS_PER_SEC << std::endl;
-		t0 = t1;
+		//t1 = std::clock();
+		//std::cout << float(t1 - t0) / CLOCKS_PER_SEC << std::endl;
+		//t0 = t1;
 
 
 	math::vec_prod(f_space, dphase, nchann);
-		t1 = std::clock();
-		std::cout << float(t1 - t0) / CLOCKS_PER_SEC << std::endl;
-		t0 = t1;
+		//t1 = std::clock();
+		//std::cout << float(t1 - t0) / CLOCKS_PER_SEC << std::endl;
+		//t0 = t1;
 	fftw_execute(ifft);
-		t1 = std::clock();
-		std::cout << float(t1 - t0) / CLOCKS_PER_SEC << std::endl;
-		t0 = t1;
+		//t1 = std::clock();
+		//std::cout << float(t1 - t0) / CLOCKS_PER_SEC << std::endl;
+		//t0 = t1;
 }
 
 void detect(fftw_complex* t_space, double* sum, size_t nchann)
@@ -967,19 +967,21 @@ std::string Profile::dedisperse_coherent_search(
 
 	double fcomp, fmin, fmax;
 	double tau;
+	long double t0;
 
-	fftw_complex* dphase;
+	fftw_complex *dphase;
 	fftw_complex *f_space, *t_space;
 	fftw_complex *conv_f_space;
 	fftw_complex *ker_f = nullptr;
-	double *sum_dm1, *conv_t_space;
-	fftw_plan fft, ifft;
-	fftw_plan conv_fft, conv_ifft;
+	double 		 *sum_dm1, *conv_t_space;
+	fftw_plan 	 fft, ifft;
+	fftw_plan 	 conv_fft, conv_ifft;
 
-	fmin = hdr->fmin;
-	fmax = hdr->fmax;
+	fmin  = hdr->fmin;
+	fmax  = hdr->fmax;
 	fcomp = hdr->fcomp;
-	tau = hdr->tau;
+	tau   = hdr->tau;
+	t0    = hdr->t0;
 
 	double dtmax = 4.15e6 * DM * (std::pow(std::min(fmax, fmin), -2) - std::pow(std::max(fmax, fmin), -2));
 	n_DM = static_cast<size_t>(dtmax/tau);
@@ -1018,6 +1020,8 @@ std::string Profile::dedisperse_coherent_search(
 		fft = fftw_plan_dft_1d(nchann, ker_f, ker_f, FFTW_BACKWARD, FFTW_ESTIMATE);
 		fftw_execute(fft);
 		fftw_destroy_plan(fft);
+
+		math::vec_prod(ker_f, 1.0/nchann, nchann);
 
 		delete[] ker_t;
 		ker_t = nullptr;
@@ -1086,13 +1090,13 @@ std::string Profile::dedisperse_coherent_search(
 		shift_window_coherent(fft, ifft, f_space+1, dphase, nchann);
 		detect(t_space, sum_dm1, nchann);
 
+
 		if (ker_f)
 		{
 			shift_window_coherent(conv_fft, conv_ifft, conv_f_space+1, ker_f, nchann);
 		}
 		else if (conv_type == "box")
 		{
-			std::cout << "box conv: " << fwhm*1e3/tau << std::endl;
 			math::box_conv(sum_dm1, conv_t_space, size_t(fwhm * 1e3/tau + .5),  nchann);
 		}
 		else
@@ -1100,27 +1104,39 @@ std::string Profile::dedisperse_coherent_search(
 			conv_t_space = sum_dm1;
 		}
 
-		//math::subtract_baseline(conv_t_space+n_DM, N, BL_window);
-		matched_filter(conv_t_space+n_DM, N, threshold, pulses_dm1, power_dm1);
+		// Find pulses with overlapping windows
+		math::subtract_baseline(conv_t_space, buf_max/2, BL_window);
+		math::normalize_std(conv_t_space, buf_max/2);
+		matched_filter(conv_t_space, buf_max/2, threshold, pulses_dm1, power_dm1);
+		
 
 
+		/*
+		// Debug output
 		if (n_found == 0)
 		{
-			std::ofstream test1(output_dir + "test1.bin");
-			test1.write((char*) (conv_t_space + n_DM), N*sizeof(double));
+			std::ofstream test0(output_dir + "conv.bin");
+			test0.write((char*) (conv_t_space + n_DM), N*sizeof(double));
+			test0.close();
+
+			std::ofstream test1(output_dir + "sum.bin");
+			test1.write((char*) (sum_dm1 + n_DM), N*sizeof(double));
 			test1.close();
 		}
+		*/
 
 		// Save info of the search
-		//for(size_t i = 0; i < power_dm1.size(); ++i)
-		//	csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i]) << '\n';
+		for(size_t i = 0; i < power_dm1.size(); ++i)
+			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i]) << '\n';
 
 		// Save profiles of the search
 		is_pulse = pulses_dm1.size() > 0;
-		is_pulse = true;
+		//is_pulse = true;
 
 		if (is_pulse)
 			n_found ++;
+
+		hdr->t0 = t0 + reader->point2time(sumidx) / 86400.0L;
 
 		if (save_raw && is_pulse) 
 		{
@@ -1148,25 +1164,32 @@ std::string Profile::dedisperse_coherent_search(
 			PSRFITS_Writer writer0(output_dir + "conv1_" + reader->filename + "_" + std::to_string(n_found));
 			writer0.createPrimaryHDU("SEARCH", hdr);
 			writer0.append_subint_search(
-					conv_t_space + n_DM, nullptr,
-					N, 1, 1, 
+					conv_t_space, nullptr,
+					N+n_DM, 1, 1, 
 					DM, fmin, fmax, tau);
 
 			PSRFITS_Writer writer1(output_dir + "sum1_" + reader->filename + "_" + std::to_string(n_found));
 			writer1.createPrimaryHDU("SEARCH", hdr);
 			writer1.append_subint_search(
-					sum_dm1 + n_DM, nullptr,
-					N, 1, 1, 
+					//sum_dm1 + n_DM, nullptr,
+					sum_dm1, nullptr,
+					N + n_DM, 1, 1, 
 					DM, fmin, fmax, tau);
 		}
 
 		buf_pos = buf_max - 2*n_DM;
 		sumidx += buf_pos/2;
-		std::cout << "t = " << reader->point2time(sumidx) << " s" << std::endl;
+
+
+
+		std::cout << "\x1b[2K\r" ;
+		std::cout << "t = " << reader->point2time(sumidx) << " s";
+		std::cout << std::flush;
 
 	}
-
+	std::cout << std::endl;
 	std::cout << "Found " << n_found << " windows" << std::endl;
+	hdr->t0 = t0;
 
 	if (ker_f)
 		delete[] ker_f;

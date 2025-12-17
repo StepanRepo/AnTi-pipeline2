@@ -18,7 +18,7 @@ def bin_time(data, bin_size):
     trimmed = data[:n_bins * bin_size]
     reshaped = trimmed.reshape(n_bins, bin_size, F)
     
-    return reshaped.sum(axis=1)
+    return reshaped.mean(axis=1)
 
 def read_psr(hdul):
     """
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     for filename in files:
         print(f"Processing {filename.stem}")
 
-        binning = 2**0
+        binning = 2**14
 
         data_2d, freqs, tl = read(filename)
         data_2d = data_2d.T
@@ -187,6 +187,9 @@ if __name__ == "__main__":
 
         data_2d = bin_time(data_2d.T, binning).T
         tl = tl[::binning][:data_2d.shape[1]]
+
+        if (len(tl) == 0):
+            raise "Check binning size"
 
         if (data_2d.shape[0] > 1):
 
@@ -230,7 +233,7 @@ if __name__ == "__main__":
                             extent = extent,
                             vmin = lower,
                             vmax = upper,
-                            #interpolation = "none",
+                            interpolation = "none",
                             )
             ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))
 
@@ -272,7 +275,12 @@ if __name__ == "__main__":
             ax.plot(tl.to(val), data_2d[0])
             ax.set_xlabel(f"Time, {val}")
             ax.set_ylabel("Integal Intensity")
+            #ax.set_ylim(.015, .030)
 
+            #ax.axhline(7, ls="--", c = "C1")
+            #ax.axhline(-7, ls="--", c = "C1")
+
+            n_DM = 8916286
             tmax = tl[np.argmax(data_2d[0])]
             dt = 5*u.us
             #ax.set_xlim((tmax - dt).to_value(val), (tmax + dt).to_value(val))

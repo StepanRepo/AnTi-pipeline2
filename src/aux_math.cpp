@@ -5,6 +5,8 @@
 #include <iostream>
 #include <deque>
 
+#include <fstream>
+
 namespace math 
 {
 
@@ -53,6 +55,16 @@ namespace math
 		{
 			a[i][0] = a[i][0] * b[i];
 			a[i][1] = a[i][1] * b[i];
+		}
+	}
+
+	void vec_prod(fftw_complex* __restrict__ a, double b, size_t n) 
+	{
+		#pragma omp simd
+		for (size_t i = 0; i < n; ++i)
+		{
+			a[i][0] = a[i][0] * b;
+			a[i][1] = a[i][1] * b;
 		}
 	}
 
@@ -280,125 +292,173 @@ namespace math
 	// ------------------------------------------------------------
 	// 3. Time-domain profile processing
 	// ------------------------------------------------------------
-	void subtract_baseline(double *data, size_t n, size_t window_size) 
-	{
-		if (n == 0 || window_size == 0 || window_size > n) return;
 
-		// Circular buffer for current window
-		double* window = new double[window_size];
-		size_t head = 0;  // Next write position in circular buffer
+	// This function was written by Qwen3-Max AI
+	// with human tweaks
+	void subtract_baseline(double* data, size_t n, size_t k) {
+		if (k == 0 || n == 0) return;
+		if (k % 2 == 0) k++; // Ensure odd
+		const size_t half = k / 2;
 
-		// Initialize first window: copy first 'window_size' elements
-		for (size_t i = 0; i < window_size; ++i) {
-			window[i] = data[(int(i) - window_size/2) % n];
+		// Step 1: Find global min/max for 8-bit quantization
+		double min_val = *std::min_element(data, data + n);
+		double max_val = *std::max_element(data, data + n);
+		const double eps = 1e-12;
+		if (max_val - min_val < eps) return; // constant data
+
+		// Use 8-bit quantization (256 bins)
+		const uint32_t NBINS = 256;
+		const double scale = NBINS / (max_val - min_val);
+		const double inv_scale = (max_val - min_val) / NBINS;
+
+		// Histogram for current window
+		std::vector<uint32_t> hist(NBINS, 0);
+		uint32_t count = 0;
+
+		// Helper: quantize value to bin (clamped to [0,255])
+		auto quantize = [&](double x) -> uint8_t {
+			int bin = static_cast<int>((x - min_val) * scale);
+			if (bin < 0) bin = 0;
+			else if (bin >= NBINS) bin = NBINS - 1;
+			return static_cast<uint8_t>(bin);
+		};
+
+		// Helper: get median from histogram (linear interpolation)
+		auto get_median = [&]() -> double {
+			uint32_t target = (count + 1) / 2;
+			uint32_t cum = 0;
+			for (uint32_t b = 0; b < NBINS; ++b) {
+				cum += hist[b];
+				if (cum >= target) {
+					double frac = (target - (cum - hist[b])) / static_cast<double>(hist[b]);
+					return min_val + (b + frac) * inv_scale;
+				}
+			}
+			return max_val;
+		};
+
+		// Reflection index helper
+		auto reflect_index = [&](int64_t idx) -> size_t {
+			if (idx >= 0 && idx < (int64_t)n) return idx;
+			if (idx < 0) return static_cast<size_t>(-idx - 1);
+			return static_cast<size_t>(2 * (n - 1) - idx);
+		};
+
+		// Initialize window for i=0
+		count = 0;
+		std::memset(hist.data(), 0, NBINS * sizeof(uint32_t));
+		for (size_t j = 0; j < k; ++j) {
+			size_t idx = reflect_index(static_cast<int64_t>(j) - static_cast<int64_t>(half));
+			double val = data[idx];
+			uint8_t bin = quantize(val);
+			hist[bin]++;
+			count++;
 		}
 
-		// Precompute initial sum and sum of squares
-		double sum = 0.0, sum_sq = 0.0;
-		for (size_t i = 0; i < window_size; ++i) 
-		{
-			sum += window[i];
-			sum_sq += window[i] * window[i];
+		// Store medians temporarily (we can't overwrite data while sliding)
+		static thread_local std::vector<double> medians;
+		if (medians.size() != n) medians.resize(n);
+		medians[0] = get_median();
+
+		// Sliding window: add right, remove left
+		for (size_t i = 1; i < n; ++i) {
+			// Remove leftmost element of previous window
+			size_t left_idx = reflect_index(static_cast<int64_t>(i - 1) - static_cast<int64_t>(half));
+			double left_val = data[left_idx];
+			uint8_t left_bin = quantize(left_val);
+			hist[left_bin]--;
+
+			// Add new rightmost element
+			size_t right_idx = reflect_index(static_cast<int64_t>(i) + static_cast<int64_t>(half));
+			double right_val = data[right_idx];
+			uint8_t right_bin = quantize(right_val);
+			hist[right_bin]++;
+
+			medians[i] = get_median();
 		}
 
-		// Process each point with sliding window
-		for (size_t i = window_size/2; i < n; ++i) 
-		{
-			// Compute mean and std for current window
-			double mean = sum / window_size;
-			double variance = (sum_sq - sum * mean) / (window_size - 1);
-			double std = std::sqrt(variance);
-
-			if (std == 0.0) std = 1.0;  // Avoid division by zero
-
-			// Normalize current point: (x - mean) / std
-			data[i-window_size/2] = (data[i-window_size/2] - mean);// / std;
+		// Subtract baseline IN-PLACE
+		for (size_t i = 0; i < n; ++i) {
+			data[i] -= medians[i];
+		}
+	}
 
 
-			// Update window for next iteration (if not last point)
-			if (i < n - 1) 
-			{
-				double new_val = (i + 1 < n) ? data[i + 1] : data[n - 1];
-				//if (std::abs(new_val - mean) > 5.0*std) continue;
 
+	// This function was written by Qwen3-Max AI
+	// with human tweaks
+	void normalize_std(double* data, size_t n) {
+		if (n == 0) return;
 
-				// Remove oldest value (at head)
-				double old_val = window[head];
-				sum -= old_val;
-				sum_sq -= old_val * old_val;
+		// --- Step 1: Quantize residuals to 8-bit for MAD estimation ---
+		double min_val = *std::min_element(data, data + n);
+		double max_val = *std::max_element(data, data + n);
+		const double eps = 1e-12;
+		if (max_val - min_val < eps) return;
 
-				// Add new value (repeat last value at boundary)
-				window[head] = new_val;
-				sum += new_val;
+		const uint32_t NBINS = 256;
+		const double scale = NBINS / (max_val - min_val);
+		const double inv_scale = (max_val - min_val) / NBINS;
 
-				if (new_val == 0.0) break;
-				sum_sq += new_val * new_val;
+		// Quantize full array and build histogram
+		std::vector<uint32_t> hist(NBINS, 0);
+		for (size_t i = 0; i < n; ++i) {
+			int bin = static_cast<int>((data[i] - min_val) * scale);
+			if (bin < 0) bin = 0;
+			else if (bin >= NBINS) bin = NBINS - 1;
+			hist[bin]++;
+		}
 
-				// Advance head (circular)
-				head = (head + 1) % window_size;
+		// --- Step 2: Get median from histogram ---
+		uint32_t target = (n + 1) / 2;
+		uint32_t cum = 0;
+		uint32_t median_bin = 0;
+		for (uint32_t b = 0; b < NBINS; ++b) {
+			cum += hist[b];
+			if (cum >= target) {
+				median_bin = b;
+				break;
 			}
 		}
+		double median_val = min_val + (median_bin + 0.5) * inv_scale;
 
-		if (window[head] != 0.0)
-			for (size_t i = n - window_size/2; i < n; ++i) 
-				data[i] = (data[i] - sum/window_size);
-
-
-		for (size_t i = 0; i < window_size; ++i) {
-			window[i] = data[(int(i) - window_size/2) % n];
-		}
-		sum = 0.0;
-		sum_sq = 0.0;
-		for (size_t i = 0; i < window_size; ++i) 
-		{
-			sum += window[i];
-			sum_sq += window[i] * window[i];
+		// --- Step 3: Build histogram of absolute deviations (|x - median|) ---
+		double max_dev = std::max(median_val - min_val, max_val - median_val);
+		if (max_dev < eps) {
+			// All values identical — no scaling needed
+			return;
 		}
 
-		// Process each point with sliding window
-		for (size_t i = window_size/2; i < n; ++i) 
-		{
-			// Compute mean and std for current window
-			double mean = sum / window_size;
-			double variance = (sum_sq - sum * mean) / (window_size - 1);
-			double std = std::sqrt(variance);
+		const double dev_scale = NBINS / max_dev;
+		std::vector<uint32_t> dev_hist(NBINS, 0);
 
-			if (std == 0.0) std = 1.0;  // Avoid division by zero
+		for (size_t i = 0; i < n; ++i) {
+			double dev = std::abs(data[i] - median_val);
+			int bin = static_cast<int>(dev * dev_scale);
+			if (bin < 0) bin = 0;
+			else if (bin >= NBINS) bin = NBINS - 1;
+			dev_hist[bin]++;
+		}
 
-			// Normalize current point: (x - mean) / std
-			data[i-window_size/2] = data[i-window_size/2] / std;
-
-
-			// Update window for next iteration (if not last point)
-			if (i < n - 1) 
-			{
-				double new_val = (i + 1 < n) ? data[i + 1] : data[n - 1];
-				if (std::abs(new_val)/std < 5.0e-1 ) continue;
-
-
-				// Remove oldest value (at head)
-				double old_val = window[head];
-				sum -= old_val;
-				sum_sq -= old_val * old_val;
-
-				// Add new value (repeat last value at boundary)
-				window[head] = new_val;
-				sum += new_val;
-
-				if (new_val != 0.0)
-				sum_sq += new_val * new_val;
-
-				// Advance head (circular)
-				head = (head + 1) % window_size;
+		// --- Step 4: Get MAD from deviation histogram ---
+		cum = 0;
+		uint32_t mad_bin = 0;
+		for (uint32_t b = 0; b < NBINS; ++b) {
+			cum += dev_hist[b];
+			if (cum >= target) {
+				mad_bin = b;
+				break;
 			}
 		}
+		double mad = (mad_bin + 0.5) * (max_dev / NBINS);
+		double sigma = 1.4826 * mad;
 
-		double variance = (sum_sq) / (window_size - 1);
-		double std = std::sqrt(variance);
-		for (size_t i = n - window_size/2; i < n; ++i) 
-			data[i] = data[i]/std;// / std;
+		if (sigma < 1e-12) sigma = 1.0;
 
-		delete[] window;
+		// --- Step 5: Normalize IN-PLACE ---
+		for (size_t i = 0; i < n; ++i) {
+			data[i] /= sigma;
+		}
 	}
 
 	void gaussian_kernel(double* x, size_t n, double fwhm)
@@ -420,43 +480,40 @@ namespace math
 	{
 		if (n == 0 || win == 0 || win > n) return;
 
-		// Circular buffer for current window
 		double* window = new double[win];
-		size_t head = 0;  // Next write position in circular buffer
-		double mean, sum;
-		double old_val, new_val;
+		size_t head = 0;
+		double sum = 0.0;
 
-		// Initialize first window: copy first 'win' elements
-		for (int i = -int(win/2); i < int(win/2); ++i) 
+		// Initialize first window with circular indexing
+		for (int i = -int(win/2); i < int(win/2); ++i)
 		{
-			window[i + win/2] = x[i % n];
+			int idx = ((i % int(n)) + int(n)) % int(n); // Safe modulo
+			window[i + win/2] = x[idx];
 		}
 
-		// Precompute initial sum and sum of squares
-		sum = std::accumulate(window, window + win, 0.0);
+		// Precompute initial sum
+		sum = 0.0;
+		for (size_t i = 0; i < win; ++i)
+			sum += window[i];
 
-		// Process each point with sliding window
-		for (size_t i = 0; i < n; ++i) 
+		// Process each point
+		for (size_t i = 0; i < n; ++i)
 		{
-			// Compute mean and std for current window
-			mean = sum / win;
-			out[i] = mean;
+			// Output mean
+			out[i] = sum / win;
 
+			// Get new value (circular index)
+			int new_idx = ((int(i) - int(win/2)) + int(n)) % int(n);
+			double new_val = x[new_idx];
 
-			// Update window for next iteration (if not last point)
-			new_val = x[(i - win/2) % n];
-			old_val = window[head];
-
-			// Remove oldest value (at head)
+			// Update window and sum
+			double old_val = window[head];
 			sum = sum - old_val + new_val;
-
-			// Add new value (circular on boundaries)
 			window[head] = new_val;
-			sum += new_val;
-
-			// Advance head (circular)
 			head = (head + 1) % win;
 		}
+
+		delete[] window;
 	}
 
 

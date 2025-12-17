@@ -29,7 +29,7 @@ if __name__ == "__main__":
         print(f"Processing {filename.stem}")
         binning = 2**0
         tau = 9.765625e-7*binning*2
-        #tau = 0.000200089*binning*2
+        tau = 0.000200089*binning*2
         print(f"tau:   {tau*1e-3:} s")
 
 
