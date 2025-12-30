@@ -246,8 +246,6 @@ int main()
 		}
 
 
-		if (verbose > 0)
-			hdr->print();
 
 		// Cutting a piece from the file if needed
 		if (t0 > 0.0)
@@ -256,6 +254,8 @@ int main()
 		if (t1 > 0.0)
 			profile.reader->set_limit(t1);
 
+		if (verbose > 0)
+			hdr->print();
 
 		// Find redshift correction if the parameter file is available
 		// if not, the redshift is defaulted to zero

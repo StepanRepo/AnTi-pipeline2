@@ -185,16 +185,23 @@ void Profile::matched_filter(double* data, size_t N, double threshold, std::vect
 	power.resize(counter);
 }
 
-std::string Profile::csv_result (size_t left, size_t right, double power) const
+std::string Profile::csv_result (size_t left, size_t right, double power, size_t n_found) const
 {
 	std::ostringstream row("");
-	row << std::fixed << std::setprecision(19); // f5.14 (down to ns in MJD)  
+	row << std::fixed << std::setprecision(14); // f5.14 (down to ns in MJD)  
 
-	double mjd_left  = hdr->t0 + reader->point2time(sumidx + left)/86400.0;
-	double mjd_right = hdr->t0 + reader->point2time(sumidx + right)/86400.0;
+	double mjd_left  = hdr->t0 + reader->point2time(left)/86400.0;
+	double mjd_right = hdr->t0 + reader->point2time(right)/86400.0;
+	double width = reader->point2time(right) - reader->point2time(left);
 
+
+	row << n_found << "; ";
 	row << mjd_left << "; ";
 	row << mjd_right << "; ";
+
+	row << std::fixed << std::setprecision(9); // f.9 
+	row << width << "; ";
+	row << std::fixed << std::setprecision(3); // f.9 
 	row << power << "; ";
 
 	return row.str();
@@ -452,15 +459,21 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 	buf_max = 0;
 	sumidx = 0;
 
-	while(true)
+	bool eof = false;
+	while(true && !eof)
 	{
 		if (buf_pos + obs_window >= buf_max)
 			fill_2d(pre, nchann, buf_pos, buf_max, obs_window);
 
 		if (buf_max < obs_window)
-			break; // EOF is reached
-				   //
-	
+		{
+			eof = true; // EOF is reached
+
+			// zero padding to save the last part of the file
+			std::fill(pre + buf_max*nchann, pre + obs_window*nchann, 0.0);
+		}
+
+
 		shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
 
 
@@ -486,32 +499,6 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 		sumidx += buf_pos;
 		std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
 	}
-
-	// zero padding to save the last part of the file
-	std::fill(pre + buf_max*nchann, pre + obs_window*nchann, 0.0);
-	shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
-
-
-	for (size_t t = 0; t < obs_window - n_DM; ++t) 
-		sum[t] = std::accumulate(post + t*nchann, post + (t+1)*nchann, 0.0);
-
-	buf_pos = buf_max - n_DM;
-	sumidx += buf_pos;
-	std::cout << "t = " << reader->point2time(sumidx) << " s" << std::endl;
-
-
-	if (save_raw)
-		raw_output.write(reinterpret_cast<const char*>(pre),
-				nchann * (buf_max - n_DM) * sizeof(double));
-
-	if (save_dyn)
-		dyn_output.write(reinterpret_cast<const char*>(post),
-				nchann * (buf_max - n_DM) * sizeof(double));
-
-	if (save_sum)
-		sum_output.write(reinterpret_cast<const char*>(sum),
-				(buf_max - n_DM) * sizeof(double));
-
 
 
 	// Convert save buffers into readable psrfits files
@@ -675,7 +662,7 @@ std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann, doub
 
 		// save info of the search
 		for(size_t i = 0; i < power_dm1.size(); ++i)
-			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i]) << '\n';
+			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], n_found) << '\n';
 
 
 		// save profiles of the search
@@ -1051,7 +1038,7 @@ std::string Profile::dedisperse_coherent_search(
 
 	// write table header
 	csv << "# ===== Search Results =====" << std::endl;
-	csv << "# left; right; power;" << std::endl;
+	csv << "# num; left; right; width; power;" << std::endl;
 	size_t empty_size =  csv.tellp();
 
 	buf_pos = 0;
@@ -1125,9 +1112,6 @@ std::string Profile::dedisperse_coherent_search(
 		}
 		*/
 
-		// Save info of the search
-		for(size_t i = 0; i < power_dm1.size(); ++i)
-			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i]) << '\n';
 
 		// Save profiles of the search
 		is_pulse = pulses_dm1.size() > 0;
@@ -1136,7 +1120,12 @@ std::string Profile::dedisperse_coherent_search(
 		if (is_pulse)
 			n_found ++;
 
-		hdr->t0 = t0 + reader->point2time(sumidx) / 86400.0L;
+		hdr->t0 = t0 + reader->point2time(sumidx-n_DM) / 86400.0L;
+
+		// Save info of the search
+		for(size_t i = 0; i < power_dm1.size(); ++i)
+			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], n_found) << '\n';
+
 
 		if (save_raw && is_pulse) 
 		{
@@ -1161,14 +1150,14 @@ std::string Profile::dedisperse_coherent_search(
 		if (save_sum && is_pulse) 
 		{
 
-			PSRFITS_Writer writer0(output_dir + "conv1_" + reader->filename + "_" + std::to_string(n_found));
+			PSRFITS_Writer writer0(output_dir + "conv_" + reader->filename + "_" + std::to_string(n_found));
 			writer0.createPrimaryHDU("SEARCH", hdr);
 			writer0.append_subint_search(
 					conv_t_space, nullptr,
 					N+n_DM, 1, 1, 
 					DM, fmin, fmax, tau);
 
-			PSRFITS_Writer writer1(output_dir + "sum1_" + reader->filename + "_" + std::to_string(n_found));
+			PSRFITS_Writer writer1(output_dir + "sum_" + reader->filename + "_" + std::to_string(n_found));
 			writer1.createPrimaryHDU("SEARCH", hdr);
 			writer1.append_subint_search(
 					//sum_dm1 + n_DM, nullptr,

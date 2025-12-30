@@ -213,12 +213,15 @@ bool PSRFITS_Writer::createPrimaryHDU(std::string obs_mode, const BaseHeader* he
     // Frequency info
     double obsfreq = header->fmax; 
     double obsbw = std::abs(header->fmax - header->fmin);
+	int imjd = int(header->t0);
+	double smjd = (header->t0 - double(imjd))*86400.0L;
+
     fits_write_key(fptr, TDOUBLE, "OBSFREQ", &obsfreq, "[MHz] Centre frequency for observation", &status);
     fits_write_key(fptr, TDOUBLE, "OBSBW", &obsbw, "[MHz] Bandwidth for observation", &status);
     fits_write_key(fptr, TINT,    "OBSNCHAN", (void*)&(header->nchann), "Number of frequency channels", &status);
     fits_write_key(fptr, TDOUBLE, "CHAN_DM", new double(0.0), "[cm-3 pc] DM used for on-line dedispersion", &status);
-    fits_write_key(fptr, TINT,    "STT_IMJD", new int(header->t0), "[days] Start MJD (UTC)", &status);
-    fits_write_key(fptr, TDOUBLE, "STT_SMJD", new double(fmod(header->t0, 1.0)*86400.0), "[s] Start time (sec past UTC 00h)", &status);
+    fits_write_key(fptr, TINT,    "STT_IMJD", &imjd, "[days] Start MJD (UTC)", &status);
+    fits_write_key(fptr, TDOUBLE, "STT_SMJD", &smjd, "[s] Start time (sec past UTC 00h)", &status);
     fits_write_key(fptr, TDOUBLE, "STT_OFFS", new double(0.0), "[s] Start time offset", &status);
 
 	check_status("Writing PRIMARY HDU");

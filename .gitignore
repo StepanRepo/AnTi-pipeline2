@@ -8,3 +8,6 @@ main
 *.txt
 wisdoms/*
 nohup.out
+search_res/*
+rup103/*
+tmp/*

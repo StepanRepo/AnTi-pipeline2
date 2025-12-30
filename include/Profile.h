@@ -20,7 +20,7 @@ class Profile
 		void shift_window_coherent(fftw_plan fft, fftw_plan ifft, fftw_complex* f_space, fftw_complex* dphase, size_t nchann);
 
 		void matched_filter(double* data, size_t N, double threshold, std::vector<size_t>& pos, std::vector<double>& power);
-		std::string csv_result (size_t left, size_t right, double power) const;
+		std::string csv_result (size_t left, size_t right, double power, size_t num) const;
 
 
 	public:

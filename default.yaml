@@ -1,44 +1,42 @@
 general:
-  mode: "stream"
-  input_dir: "data"
-  output_dir: "."
-  parfile: "0329.par"
+  mode: "search"
+  input_dir: "rup103"
+  output_dir: "rup103"
+  parfile: "0531.par"
   site: "PO"
   verbose: 1
   buf_size: 10
 
   #t0: 147.570
   #t1: 147.610
-  #t0: 147.510
-  #t1: 147.680
-  t0: 7.400
-  t1: 7.600
+  #t0: 147.56
+  #t1: 147.7
   
-  save_raw: true
+  save_raw: false
   save_dyn: true
-  save_sum: false
+  save_sum: true
 
 
 
 options:
 
-  ddtype: "incoherent"
+  ddtype: "coherent"
 
   #t2pred: "t2pred.dat"
 
-  #nchann: 33554432
-  nchann: 4096
+  nchann: 33554432
+  #nchann: 4096
   #nchann: 512
 
-  bl_window: 100.0e-6
+  bl_window: 50.0e-6
   search_threshold: 7.0
   search_fwhm: 10.0e-6
   conv_type: "gaussian"
 
   filter: true
   tail_threshold: .4
-  std_threshold: 15.0
-  downsample: 1024
+  std_threshold: 30.0
+  downsample: 4096
   max_len: 100000
 
   
@@ -53,9 +51,13 @@ advanced:
   dm: 56.7712
 
 files:
-  #- wideband_1024_2048.vdif
+  #- rup103_bv_055-0550_ch01.vdif
+  #- rup103_bv_055-0601_ch01.vdif
   - rup103_bv_055-0612_ch01.vdif
-  #- 010818_0329+54_00adc
-  #- Crab_pulse/r6326e_sw_326-1702_ch01.vdif_7195.vdif
-  #- Crab_pulse/r6326e_zv_326-1702_ch01.vdif_7194.vdif
-  #- Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif
+  #- rup103_bv_055-0623_ch01.vdif
+  #- rup103_bv_055-0634_ch01.vdif
+  #- rup103_bv_055-0645_ch01.vdif
+  #- rup103_bv_055-0656_ch01.vdif
+  #- rup103_bv_055-0707_ch01.vdif
+  #- rup103_bv_055-0718_ch01.vdif
+  #- rup103_bv_055-0729_ch01.vdif

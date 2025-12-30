@@ -125,7 +125,7 @@ def read_search(hdul):
 
     # Cast DATA to float and apply scale/offset
     # PSRFITS stores data in (bin, chan, pol) order
-    real_data = data.astype(np.float64) 
+    real_data = data.astype(np.float32) 
     real_data = (real_data * dat_scl[:, np.newaxis, np.newaxis, :] + dat_offs[:, np.newaxis, np.newaxis, :]) * dat_wts[:, np.newaxis, np.newaxis, :]
 
     #plt.figure()
@@ -172,15 +172,23 @@ def read(filename):
 if __name__ == "__main__":
     path = Path(".")
     path = Path("data")
-    files = np.sort(list(path.glob("*.fits")))
+    path = Path("rup103")
+
+    files = np.sort(list(path.glob("conv*.fits")))
+    files = [f"rup103/sum_rup103_bv_055-0612_ch01_{i}.fits" for i in range(1, 50)]
 
     for filename in files:
+        filename = Path(filename)
         print(f"Processing {filename.stem}")
 
-        binning = 2**14
 
         data_2d, freqs, tl = read(filename)
         data_2d = data_2d.T
+
+        if(data_2d.shape[0] == 1):
+            binning = 2**14
+        else:
+            binning = 2**0
 
         tl = tl * u.s
         freqs = freqs * u.MHz
@@ -231,8 +239,8 @@ if __name__ == "__main__":
                             aspect = "auto",
                             cmap = "Greys",
                             extent = extent,
-                            vmin = lower,
-                            vmax = upper,
+                            vmin = lower * (1 + .2),
+                            vmax = upper * (1 - .2),
                             interpolation = "none",
                             )
             ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))
@@ -241,7 +249,6 @@ if __name__ == "__main__":
             ax[0, 1].set_xscale("log")
             ax[0, 1].plot(fr, freqs)
             ax[0, 1].set_ylim(freqs[0].to_value(u.MHz), freqs[-1].to_value(u.MHz))
-
 
 
             #clipped, l, u = sigmaclip(np.log(fr[fr>0]), 3, 3)
@@ -275,7 +282,9 @@ if __name__ == "__main__":
             ax.plot(tl.to(val), data_2d[0])
             ax.set_xlabel(f"Time, {val}")
             ax.set_ylabel("Integal Intensity")
-            #ax.set_ylim(.015, .030)
+            ax.grid()
+            #ax.set_ylim(.05, .08)
+            #ax.set_xlim(130, 160)
 
             #ax.axhline(7, ls="--", c = "C1")
             #ax.axhline(-7, ls="--", c = "C1")
