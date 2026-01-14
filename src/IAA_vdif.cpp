@@ -128,6 +128,7 @@ VDIFHeader::VDIFHeader():
 	uflag(false), sync_pattern(0), das_id(0), 
 	t(0.0L), n_samples(0) 
 {
+	nsubint = 1;
 		// All members are initialized in the member initializer list above.
 }
 
@@ -498,6 +499,11 @@ bool IAA_vdif::fill_buffer()
 }
 
 
+bool IAA_vdif::allow_1d()
+{return true;}
+
+bool IAA_vdif::allow_2d()
+{return true;}
 
 void IAA_vdif::skip(double sec)
 {

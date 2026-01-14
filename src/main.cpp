@@ -91,6 +91,11 @@ std::string get_format(const std::string &filename)
 		return "IAA_vdif";
 	}
 
+	if (filename.length() >= 5 && 
+			filename.substr(filename.length() - 5) == ".fits") {
+		return "PSRFITS";
+	}
+
 	return "Unknown";
 }
 
@@ -227,7 +232,7 @@ int main()
 
 
 		Profile profile(input_dir + filename, format, 
-				size_t(buf_size * 1024 * 1024 * 1024),
+				size_t(buf_size * (1 << 30)),
 				save_raw, save_dyn, save_sum, output_dir); 
 		BaseHeader* hdr = profile.getHeader();
 

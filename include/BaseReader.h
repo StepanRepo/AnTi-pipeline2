@@ -12,6 +12,7 @@
 class BaseReader 
 {
 	protected:
+		std::ifstream file;             // Input file stream for the ADC file
 
 		double* buffer;                 // Main processing buffer holding decoded data (double)
 		size_t buf_pos;                 // Current read position within the main buffer
@@ -32,7 +33,6 @@ class BaseReader
 
 		// File handling members
 		std::string filename = "";
-		std::ifstream file;             // Input file stream for the ADC file
 		bool is_open = false;
 
 
@@ -45,6 +45,10 @@ class BaseReader
 
 		size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num);
 
+	
+		// Reset observational file to
+		// the beginning. Has a default realisation and 
+		// may be overwritten	
 		virtual void reset();
 
 		// Virtual destructor
@@ -54,6 +58,9 @@ class BaseReader
 		virtual double point2time(size_t point) = 0;
 		virtual void skip(double sec) = 0;
 		virtual void set_limit(double t) = 0;
+
+		virtual bool allow_1d() = 0;
+		virtual bool allow_2d() = 0;
 };
 
 #endif // BASE_READER_H

@@ -43,6 +43,10 @@ class ADCHeader : public BaseHeader
 		std::string start_date_s;
 		std::string start_utc_s;
 
+		size_t numpar;
+		size_t total_pulses;
+		bool folded;
+
 		ADCHeader();
 		void decode(const char* h_buff);
 		void print() const override; // implement in .cpp
@@ -76,6 +80,8 @@ class PRAO_adc : public BaseReader
 		virtual double point2time(size_t point) override;
 		virtual void skip(double sec) override;
 		virtual void set_limit(double t) override; 
+		virtual bool allow_1d() override;
+		virtual bool allow_2d() override;
 };
 
 #endif // PRAO_ADC_H

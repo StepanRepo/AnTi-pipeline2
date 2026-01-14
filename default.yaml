@@ -1,16 +1,14 @@
 general:
   mode: "search"
-  input_dir: "rup103"
-  output_dir: "rup103"
+  input_dir: "data"
+  output_dir: "data"
   parfile: "0531.par"
   site: "PO"
   verbose: 1
   buf_size: 10
 
-  #t0: 147.570
-  #t1: 147.610
-  #t0: 147.56
-  #t1: 147.7
+  t0: 147.55
+  t1: 147.65
   
   save_raw: false
   save_dyn: true
@@ -25,16 +23,16 @@ options:
   #t2pred: "t2pred.dat"
 
   nchann: 33554432
-  #nchann: 4096
+  #nchann: 2048
   #nchann: 512
 
-  bl_window: 50.0e-6
+  bl_window: 300.0e-6
   search_threshold: 7.0
   search_fwhm: 10.0e-6
   conv_type: "gaussian"
 
   filter: true
-  tail_threshold: .4
+  tail_threshold: .3
   std_threshold: 30.0
   downsample: 4096
   max_len: 100000
@@ -51,9 +49,11 @@ advanced:
   dm: 56.7712
 
 files:
+  - dyn_rup103_bv_055-0612_ch01_1.fits
+  #- Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif
   #- rup103_bv_055-0550_ch01.vdif
   #- rup103_bv_055-0601_ch01.vdif
-  - rup103_bv_055-0612_ch01.vdif
+  #- rup103_bv_055-0612_ch01.vdif
   #- rup103_bv_055-0623_ch01.vdif
   #- rup103_bv_055-0634_ch01.vdif
   #- rup103_bv_055-0645_ch01.vdif

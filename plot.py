@@ -175,7 +175,7 @@ if __name__ == "__main__":
     path = Path("rup103")
 
     files = np.sort(list(path.glob("conv*.fits")))
-    files = [f"rup103/sum_rup103_bv_055-0612_ch01_{i}.fits" for i in range(1, 50)]
+    files = [f"rup103/sum_rup103_bv_055-0612_ch01_{i}.fits" for i in range(17, 18)]
 
     for filename in files:
         filename = Path(filename)
@@ -186,7 +186,7 @@ if __name__ == "__main__":
         data_2d = data_2d.T
 
         if(data_2d.shape[0] == 1):
-            binning = 2**14
+            binning = 2**8
         else:
             binning = 2**0
 
@@ -293,6 +293,7 @@ if __name__ == "__main__":
             tmax = tl[np.argmax(data_2d[0])]
             dt = 5*u.us
             #ax.set_xlim((tmax - dt).to_value(val), (tmax + dt).to_value(val))
+            ax.set_xlim(24.85, 25.00)
 
 
 

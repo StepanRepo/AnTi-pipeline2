@@ -14,9 +14,10 @@ class BaseHeader
 		size_t CUT_SIZE = SIZE_MAX;		// Number of points before cutoff
 		long double t0 = 0.0L;      // Start time in MJD
 		std::string name = "";
-		size_t numpar = 0;
+		std::string MODE = "";
 
-
+		size_t nsubint = 0;
+		double *t_subint = nullptr;
 		
 		
 		// System information
@@ -25,21 +26,17 @@ class BaseHeader
 		double fmin = 0.0, fmax = 0.0, fcomp = 0.0;
 
 		// file description
-		std::string type = "";
-		bool folded = false;
-		bool dedispersed = false;
-		bool summed = false;
-		bool complex = false;
+		bool cmplx = false;
 
 		// Dedispersion description
 		double dm = 0.0;
 		size_t nchann = 0;
+		size_t npol = 0;
 
 		// Folding description
 		double period = 0.0;
 		std::string cheb_file = "";
 		size_t obs_window = 0;
-		size_t total_pulses = 0;
 
 		// Virtual destructor for safe polymorphism
 		virtual ~BaseHeader() = default;

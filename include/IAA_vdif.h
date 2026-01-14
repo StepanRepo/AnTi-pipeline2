@@ -133,6 +133,8 @@ public:
 	virtual void skip(double sec) override;
 	virtual void set_limit(double t) override; // implement in .cpp
 	virtual void reset() override;
+	virtual bool allow_1d() override;
+	virtual bool allow_2d() override;
 };
 
 #endif // IAA_VDIF_H

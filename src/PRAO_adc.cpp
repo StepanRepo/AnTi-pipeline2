@@ -171,7 +171,7 @@ void ADCHeader::decode(const char* h_buff)
         } 
 		else if (key == "numpuls") 
 		{
-            total_pulses = std::stoi(value);
+			total_pulses = std::stoi(value);
         } 
 		else if (key == "tay" || key == "tau") 
 		{
@@ -222,6 +222,8 @@ void ADCHeader::decode(const char* h_buff)
     // sampling rate is wrong in the file's header
     // it is 200 ns
 	nchann = 1;
+	nsubint = 1;
+	MODE = "SEARCH";
 	tau = 200.089e-6; // !!! NEED PRECICE VALUE. CONTACT CONSTRUCTORS !!!
     sampling = 1.0e-3 / tau; // Recalculate sampling rate in MHz based on corrected tau
 }
@@ -451,3 +453,9 @@ double PRAO_adc::point2time(size_t point)
 {
 	return header.tau*1.0e-3 * static_cast<double> (point);
 }
+
+bool PRAO_adc::allow_1d()
+{return true;}
+
+bool PRAO_adc::allow_2d()
+{return true;}

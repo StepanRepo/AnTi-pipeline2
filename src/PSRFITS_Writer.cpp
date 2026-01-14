@@ -211,7 +211,7 @@ bool PSRFITS_Writer::createPrimaryHDU(std::string obs_mode, const BaseHeader* he
     // Time info (from BaseHeader)
 
     // Frequency info
-    double obsfreq = header->fmax; 
+    double obsfreq = (header->fmax + header->fmin)/2.0; 
     double obsbw = std::abs(header->fmax - header->fmin);
 	int imjd = int(header->t0);
 	double smjd = (header->t0 - double(imjd))*86400.0L;
@@ -383,7 +383,20 @@ bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, con
 }
 
 
-bool PSRFITS_Writer::append_subint_fold(double *data_double, double *mask, const size_t nbin, const size_t nchan, const size_t npol, const double period, const double dm, const double fmin, const double fmax, const double tau) 
+bool PSRFITS_Writer::append_subint_fold(
+		double *data_double,
+	   	double *mask,
+	   	const size_t nbin,
+	   	const size_t nchan,
+	   	const size_t npol,
+	   	const double period,
+	   	const double dm,
+	   	const double fmin,
+	   	const double fmax,
+	   	const double fcomp,
+	   	const double tau,
+	   	std::string dds_mtd
+		) 
 {
     if (!fptr) 
 	{
@@ -396,7 +409,7 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, double *mask, const
 	char freq_form[32], wts_form[32], offs_form[32], scl_form[32], data_form[32];
 	snprintf(freq_form, sizeof(freq_form), "%dD", int(nchan));
 	snprintf(wts_form,  sizeof(wts_form),  "%dE", int(nchan));
-	snprintf(offs_form, sizeof(offs_form), "%dE", int(nchan * npol)); // usually nchan * 1
+	snprintf(offs_form, sizeof(offs_form), "%dE", int(nchan * npol)); 
 	snprintf(scl_form,  sizeof(scl_form),  "%dE", int(nchan * npol));
 	snprintf(data_form, sizeof(data_form), "%dI", int(nbin * nchan * npol));
 
@@ -498,13 +511,31 @@ bool PSRFITS_Writer::append_subint_fold(double *data_double, double *mask, const
     // DATA (int16)
     fits_write_col(fptr, TSHORT, 8, row, 1, nbin * nchan * npol, data_int.data(), &status);
 
-	check_status("Writing SUBINT bintable (dynamic spectrum)");
+	check_status("Writing SUBINT bintable (folded pulse)");
+
+	append_history(1, npol, nchan, nbin,
+			dm, fmin, fmax, fcomp,
+			tau, dds_mtd, mask
+			);
+
+
 
     return true;
 }
 
 
-bool PSRFITS_Writer::append_subint_stream(std::string stream_file, double *mask, const size_t nchan, const size_t npol, const double dm, const double fmin, const double fmax, const double tau, const bool cmp)
+bool PSRFITS_Writer::append_subint_stream(
+		std::string stream_file, 
+		double *mask,
+	   	const size_t nchan,
+	   	const size_t npol,
+	   	const double dm,
+	   	const double fmin,
+	   	const double fmax,
+	   	const double fcomp,
+	   	const double tau,
+		const std::string dds_mtd,
+	   	const bool cmp)
 {
     if (!fptr) 
 	{
@@ -572,6 +603,7 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, double *mask,
     fits_write_key(fptr, TINT, "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
     fits_write_key(fptr, TINT, "NCH_STRT", new int(0), "Channel/sub-band offset for split files", &status);
 	double dB = std::abs(fmax - fmin) / double(nchan);
+	dB = cmp ? dB*2.0 : dB;
     fits_write_key(fptr, TDOUBLE, "CHAN_BW", &dB, "[MHz] Channel/sub-band width", &status);
     fits_write_key(fptr, TDOUBLE, "DM", (void*) &(dm), "[cm-3 pc] DM used for dedispersion", &status);
     fits_write_key(fptr, TDOUBLE, "RM", new double(0.0), "[rad m-2] RM for post-detection deFaraday", &status);
@@ -580,7 +612,7 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, double *mask,
     fits_write_key(fptr, TINT, "NSTOT", &nstot, "Total number of samples (SEARCH mode, else 1)", &status); 
 
     fits_write_key(fptr, TINT, "EXTVER", new int(1), "auto assigned by template parser ", &status);
-    fits_write_key(fptr, TINT, "CMPLX",  (void*)&cmp, "auto assigned by template parser ", &status);
+    fits_write_key(fptr, TBYTE, "CMPLX",  (void*)&cmp, "is data complex (1/0)", &status);
 
 
     // Prepare frequency array (linear spacing)
@@ -659,11 +691,29 @@ bool PSRFITS_Writer::append_subint_stream(std::string stream_file, double *mask,
 	std::remove(stream_file.c_str());
 	delete[] data_double;
 
+	append_history(
+			nsubint, npol, nchan, 1,
+			dm, fmin, fmax, fcomp,
+			tau, dds_mtd, mask
+			);
+
 	return true;
 }
 
 
-bool PSRFITS_Writer::append_subint_search(double* data_double, double *mask, const size_t nbin, const size_t nchan, const size_t npol, const double dm, const double fmin, const double fmax, const double tau, const bool cmp)
+bool PSRFITS_Writer::append_subint_search(
+		double* data_double,
+	   	double *mask,
+	   	const size_t nbin,
+	   	const size_t nchan,
+	   	const size_t npol,
+	   	const double dm,
+	   	const double fmin,
+	   	const double fmax,
+	   	const double fcomp,
+	   	const double tau,
+		const std::string dds_mtd,
+	   	const bool cmp)
 {
     if (!fptr) 
 	{
@@ -721,6 +771,7 @@ bool PSRFITS_Writer::append_subint_search(double* data_double, double *mask, con
     fits_write_key(fptr, TINT, "NSUBOFFS", new int(0), "Subint offset (Contiguous SEARCH-mode files)", &status); 
     fits_write_key(fptr, TINT, "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
 	double dB = std::abs(fmax - fmin) / double(nchan);
+	dB = cmp ? dB*2.0 : dB;
     fits_write_key(fptr, TDOUBLE, "CHAN_BW", &dB, "[MHz] Channel/sub-band width", &status);
     fits_write_key(fptr, TDOUBLE, "DM", (void*) &(dm), "[cm-3 pc] DM used for dedispersion", &status);
     fits_write_key(fptr, TDOUBLE, "RM", new double(0.0), "[rad m-2] RM for post-detection deFaraday", &status);
@@ -729,7 +780,7 @@ bool PSRFITS_Writer::append_subint_search(double* data_double, double *mask, con
     fits_write_key(fptr, TINT, "NSTOT", &nstot, "Total number of samples (SEARCH mode, else 1)", &status); 
 
     fits_write_key(fptr, TINT, "EXTVER", new int(1), "auto assigned by template parser ", &status);
-    fits_write_key(fptr, TINT, "CMPLX",  (void*)&cmp, "auto assigned by template parser ", &status);
+    fits_write_key(fptr, TBYTE, "CMPLX",  (void*)&cmp, "is data complex (1/0)", &status);
 
 
     // Prepare frequency array (linear spacing)
@@ -795,6 +846,12 @@ bool PSRFITS_Writer::append_subint_search(double* data_double, double *mask, con
 		// DATA
 		fits_write_col(fptr, TBYTE, 7, row, 1, (actually_read*nbits/8) * nchan * npol, (void*) data_int.data(), &status);
 	}
+
+	append_history(
+			nsubint, npol, nchan, 1,
+			dm, fmin, fmax, fcomp,
+			tau, dds_mtd, mask
+			);
 
 	return true;
 }

@@ -387,76 +387,87 @@ namespace math
 
 	// This function was written by Qwen3-Max AI
 	// with human tweaks
-	void normalize_std(double* data, size_t n) {
-		if (n == 0) return;
+	void normalize_std(double* data, size_t n, size_t k) {
+		if (k == 0 || n == 0) return;
+		if (k % 2 == 0) k++; // Ensure odd
+		const size_t half = k / 2;
 
-		// --- Step 1: Quantize residuals to 8-bit for MAD estimation ---
-		double min_val = *std::min_element(data, data + n);
-		double max_val = *std::max_element(data, data + n);
+		// Reflect index (same as subtract_baseline)
+		auto reflect_index = [&](int64_t idx) -> size_t {
+			if (idx >= 0 && idx < (int64_t)n) return idx;
+			if (idx < 0) return static_cast<size_t>(-idx - 1);
+			return static_cast<size_t>(2 * (n - 1) - idx);
+		};
+
+		// Quantize absolute values |data[i]| over full range
+		double max_abs = 0.0;
+		for (size_t i = 0; i < n; ++i) {
+			double a = std::abs(data[i]);
+			if (a > max_abs) max_abs = a;
+		}
 		const double eps = 1e-12;
-		if (max_val - min_val < eps) return;
+		if (max_abs < eps) return;
 
 		const uint32_t NBINS = 256;
-		const double scale = NBINS / (max_val - min_val);
-		const double inv_scale = (max_val - min_val) / NBINS;
+		const double scale = NBINS / max_abs;
+		const double inv_scale = max_abs / NBINS;
 
-		// Quantize full array and build histogram
-		std::vector<uint32_t> hist(NBINS, 0);
-		for (size_t i = 0; i < n; ++i) {
-			int bin = static_cast<int>((data[i] - min_val) * scale);
+		auto quantize_abs = [&](double x) -> uint8_t {
+			double a = std::abs(x);
+			int bin = static_cast<int>(a * scale);
 			if (bin < 0) bin = 0;
 			else if (bin >= NBINS) bin = NBINS - 1;
+			return static_cast<uint8_t>(bin);
+		};
+
+		// Sliding histogram for |x|
+		std::vector<uint32_t> hist(NBINS, 0);
+		static thread_local std::vector<double> mad_arr;
+		if (mad_arr.size() != n) mad_arr.resize(n);
+
+		// Initialize first window
+		for (size_t j = 0; j < k; ++j) {
+			size_t idx = reflect_index(static_cast<int64_t>(j) - static_cast<int64_t>(half));
+			uint8_t bin = quantize_abs(data[idx]);
 			hist[bin]++;
 		}
 
-		// --- Step 2: Get median from histogram ---
-		uint32_t target = (n + 1) / 2;
-		uint32_t cum = 0;
-		uint32_t median_bin = 0;
-		for (uint32_t b = 0; b < NBINS; ++b) {
-			cum += hist[b];
-			if (cum >= target) {
-				median_bin = b;
-				break;
+		// Helper: get MAD from histogram
+		auto get_mad = [&](uint32_t count) -> double {
+			uint32_t target = (count + 1) / 2;
+			uint32_t cum = 0;
+			for (uint32_t b = 0; b < NBINS; ++b) {
+				cum += hist[b];
+				if (cum >= target) {
+					double frac = (target - (cum - hist[b])) / static_cast<double>(hist[b]);
+					return (b + frac) * inv_scale;
+				}
 			}
+			return max_abs;
+		};
+
+		mad_arr[0] = get_mad(k);
+
+		// Slide window
+		for (size_t i = 1; i < n; ++i) {
+			// Remove left
+			size_t left_idx = reflect_index(static_cast<int64_t>(i - 1) - static_cast<int64_t>(half));
+			uint8_t left_bin = quantize_abs(data[left_idx]);
+			hist[left_bin]--;
+
+			// Add right
+			size_t right_idx = reflect_index(static_cast<int64_t>(i) + static_cast<int64_t>(half));
+			uint8_t right_bin = quantize_abs(data[right_idx]);
+			hist[right_bin]++;
+
+			mad_arr[i] = get_mad(k);
 		}
-		double median_val = min_val + (median_bin + 0.5) * inv_scale;
 
-		// --- Step 3: Build histogram of absolute deviations (|x - median|) ---
-		double max_dev = std::max(median_val - min_val, max_val - median_val);
-		if (max_dev < eps) {
-			// All values identical — no scaling needed
-			return;
-		}
-
-		const double dev_scale = NBINS / max_dev;
-		std::vector<uint32_t> dev_hist(NBINS, 0);
-
+		// Apply normalization: divide by scaled MAD
+		const double scale_mad = 1.4826;
 		for (size_t i = 0; i < n; ++i) {
-			double dev = std::abs(data[i] - median_val);
-			int bin = static_cast<int>(dev * dev_scale);
-			if (bin < 0) bin = 0;
-			else if (bin >= NBINS) bin = NBINS - 1;
-			dev_hist[bin]++;
-		}
-
-		// --- Step 4: Get MAD from deviation histogram ---
-		cum = 0;
-		uint32_t mad_bin = 0;
-		for (uint32_t b = 0; b < NBINS; ++b) {
-			cum += dev_hist[b];
-			if (cum >= target) {
-				mad_bin = b;
-				break;
-			}
-		}
-		double mad = (mad_bin + 0.5) * (max_dev / NBINS);
-		double sigma = 1.4826 * mad;
-
-		if (sigma < 1e-12) sigma = 1.0;
-
-		// --- Step 5: Normalize IN-PLACE ---
-		for (size_t i = 0; i < n; ++i) {
+			double sigma = scale_mad * mad_arr[i];
+			if (sigma < eps) sigma = 1.0;
 			data[i] /= sigma;
 		}
 	}
@@ -520,7 +531,7 @@ namespace math
 	// ------------------------------------------------------------
 	// 3. FITS Layout Conversion 
 	// ------------------------------------------------------------
-	
+
 
 	// Helper for the general tensor shuffle (Out of place logic used internally)
 	// Template helper to handle specific dimensions (2D, 3D, 4D)

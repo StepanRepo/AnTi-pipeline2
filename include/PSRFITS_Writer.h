@@ -38,10 +38,57 @@ class PSRFITS_Writer
 		 * @return True if successful.
 		 */
 		bool createPrimaryHDU(std::string obs_mode, const BaseHeader* header);
-		bool append_history(const size_t nsubint, const size_t npol, const size_t nchan, const size_t nbin, const double dm, const double fmin, const double fmax, const double fcomp, const double tau, std::string dds_mtd = "", const double* mask = nullptr);
-		bool append_subint_fold(double *data_double, double *mask, const size_t nbin, const size_t nchan, const size_t npol, const double period, const double dm, const double fmin, const double fmax, const double tau);
-		bool append_subint_stream(std::string stream_file, double *mask, const size_t nchan, const size_t npol, const double dm, const double fmin, const double fmax, const double tau, const bool cmp = false);
-		bool append_subint_search(double* data_double, double *mask, const size_t nbin, const size_t nchan, const size_t npol, const double dm, const double fmin, const double fmax, const double tau, bool cmp = false);
+		bool append_history(
+				const size_t nsubint, 
+				const size_t npol, 
+				const size_t nchan, 
+				const size_t nbin, 
+				const double dm, 
+				const double fmin, 
+				const double fmax, 
+				const double fcomp, 
+				const double tau, 
+				std::string dds_mtd = "", 
+				const double* mask = nullptr);
+		bool append_subint_fold(
+				double *data_double,
+				double *mask,
+				const size_t nbin,
+				const size_t nchan,
+				const size_t npol,
+				const double period,
+				const double dm,
+				const double fmin,
+				const double fmax,
+				const double fcomp,
+				const double tau,
+				std::string dds_mtd = ""
+				);
+		bool append_subint_stream(
+				std::string stream_file, 
+				double *mask, 
+				const size_t nchan, 
+				const size_t npol, 
+				const double dm, 
+				const double fmin, 
+				const double fmax, 
+				const double fcomp,
+				const double tau, 
+				std::string dds_mtd = "",
+				const bool cmp = false);
+		bool append_subint_search(
+				double* data_double, 
+				double *mask, 
+				const size_t nbin, 
+				const size_t nchan, 
+				const size_t npol, 
+				const double dm, 
+				const double fmin, 
+				const double fmax, 
+				const double fcomp,
+				const double tau, 
+				std::string dds_mtd = "",
+				bool cmp = false);
 
 	private:
 		fitsfile* fptr; // CFITSIO file pointer
