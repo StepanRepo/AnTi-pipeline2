@@ -224,7 +224,7 @@ void ADCHeader::decode(const char* h_buff)
 	nchann = 1;
 	nsubint = 1;
 	MODE = "SEARCH";
-	tau = 200.089e-6; // !!! NEED PRECICE VALUE. CONTACT CONSTRUCTORS !!!
+	tau = 200.089e-6; // !!! NEED PRECISE VALUE. CONTACT CONSTRUCTORS !!!
     sampling = 1.0e-3 / tau; // Recalculate sampling rate in MHz based on corrected tau
 }
 
@@ -233,7 +233,6 @@ void ADCHeader::print() const
 {
     std::cout << "numpar      " << numpar << std::endl;
     std::cout << "name        " << name << std::endl;
-    std::cout << "date        " << start_date_s << std::endl;
     std::cout << "dt_utc      " << start_utc_s << std::endl;
     std::cout << "MJD         " << std::setprecision(20) << t0 << std::endl;
     std::cout << "period      " << period << std::endl;

@@ -101,6 +101,10 @@ def read_search(hdul):
     npol    = header['NPOL']
     signint = header['SIGNINT']        # Is the data stored as signed ints 
     tau     = header['TBIN']
+    cmplx   = not (header['CMPLX'] == 0)
+    c = 2**cmplx
+
+
 
     print(f"File contains {nsubint} subints, {nchan} channels, {nbin} bins, {npol} pols")
 
@@ -116,26 +120,25 @@ def read_search(hdul):
     if (signint == 1 and header['NBITS'] == 8):
         data = data.astype(np.int8)
 
+    dat_scl = dat_scl.reshape(nsubint, npol, nchan, c)
+    dat_offs = dat_offs.reshape(nsubint, npol, nchan, c)
+    dat_wts = dat_wts.reshape(nsubint, 1, nchan, 1)
 
-
-    if (nchan == 1):
-        dat_scl = dat_scl[:, np.newaxis]
-        dat_offs = dat_offs[:, np.newaxis]
-        dat_wts = dat_wts[:, np.newaxis]
 
     # Cast DATA to float and apply scale/offset
     # PSRFITS stores data in (bin, chan, pol) order
     real_data = data.astype(np.float32) 
-    real_data = (real_data * dat_scl[:, np.newaxis, np.newaxis, :] + dat_offs[:, np.newaxis, np.newaxis, :]) * dat_wts[:, np.newaxis, np.newaxis, :]
+    real_data = (real_data * dat_scl[:, None, :, :] + dat_offs[:, None, :, :]) * dat_wts[:, None, :, :]
 
-    #plt.figure()
-    #plt.plot(dat_offs[0])
-    #plt.plot(np.mean(real_data[0, :, 0, :], axis = 0))
-    #plt.figure()
-    #plt.plot(dat_offs[0] - np.mean(real_data[0, :, 0, :], axis = 0))
-
-    real_data = real_data.reshape(-1, *real_data.shape[-2:])
+    real_data = real_data.reshape(-1, *real_data.shape[2:])
     real_data = real_data[:nstot, :, :]
+
+
+    # Collapse complex
+    if (cmplx):
+        real_data = real_data[:, :, :, 0]**2 + real_data[:, :, :, 1]**2
+    else:
+        real_data = real_data[:, :, :, 0]
 
     # Collapse polarization (if needed) — assume Stokes I = sum of pols
     if npol > 1:
@@ -171,11 +174,10 @@ def read(filename):
 
 if __name__ == "__main__":
     path = Path(".")
-    path = Path("data")
     path = Path("rup103")
+    path = Path("data")
 
-    files = np.sort(list(path.glob("conv*.fits")))
-    files = [f"rup103/sum_rup103_bv_055-0612_ch01_{i}.fits" for i in range(17, 18)]
+    files = np.sort(list(path.glob("*.fits")))
 
     for filename in files:
         filename = Path(filename)
@@ -186,7 +188,7 @@ if __name__ == "__main__":
         data_2d = data_2d.T
 
         if(data_2d.shape[0] == 1):
-            binning = 2**8
+            binning = 2**9
         else:
             binning = 2**0
 
@@ -283,17 +285,7 @@ if __name__ == "__main__":
             ax.set_xlabel(f"Time, {val}")
             ax.set_ylabel("Integal Intensity")
             ax.grid()
-            #ax.set_ylim(.05, .08)
-            #ax.set_xlim(130, 160)
 
-            #ax.axhline(7, ls="--", c = "C1")
-            #ax.axhline(-7, ls="--", c = "C1")
-
-            n_DM = 8916286
-            tmax = tl[np.argmax(data_2d[0])]
-            dt = 5*u.us
-            #ax.set_xlim((tmax - dt).to_value(val), (tmax + dt).to_value(val))
-            ax.set_xlim(24.85, 25.00)
 
 
 

@@ -91,7 +91,6 @@ void shift_window_incoherent(const double* in, double* out, const int* shift, co
 				out[t * nchann + i] *= mask[i];
 		}
 	}
-
 }
 
 
@@ -492,6 +491,7 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 		// save processed buffer
 		// regecting last n_DM inputs
 
+
 		if (save_raw)
 			raw_output.write(reinterpret_cast<const char*>(pre),
 					nchann * (buf_max - n_DM) * sizeof(double));
@@ -565,6 +565,7 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 std::string Profile::dedisperse_incoherent_search(double DM, size_t nchann, double  BL_window_s, double threshold)
 {
 
+	throw ;
 	check_incoherent(nchann);
 
 	size_t obs_window, BL_window;
@@ -936,7 +937,7 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 		writer.createPrimaryHDU("SEARCH", hdr);
 		writer.append_subint_stream(
 				output_dir + "dyn_" + id, nullptr, 
-				2, 1, 
+				1, 1, 
 				DM, fmin, fmax, fcomp, tau, "coherent", true);
 	}
 
@@ -1174,7 +1175,7 @@ std::string Profile::dedisperse_coherent_search(
 			writer1.createPrimaryHDU("SEARCH", hdr);
 			writer1.append_subint_search(
 					(double*) (t_space + buf_pos/2), nullptr,
-					N, 2, 1, 
+					N, 1, 1, 
 					DM, fmin, fmax, fcomp, tau, "coherent", true);
 		}
 
@@ -1305,8 +1306,6 @@ void Profile::fold_dyn(double P, size_t nchann)
 		std::cout << int((rev*P - reader->point2time(sumidx))*1e6) << " us" << std::flush;
 	}
 	std::cout << std::endl;
-
-	hdr->total_pulses = rev;
 
 	#pragma omp simd
 	for(size_t i = 0; i < obs_window*nchann; ++i)
@@ -1450,8 +1449,6 @@ void Profile::fold_dyn(std::string pred_file, size_t nchann)
 
 	}
 	std::cout<<std::endl;
-
-	hdr->total_pulses = rev;
 
 	#pragma omp simd
 	for(size_t i = 0; i < obs_window*nchann; ++i)

@@ -52,81 +52,120 @@ char* convert_str(std::string str, size_t len)
  * Bit magic function
  *------------------------
  */
-inline void quantize(double *data, size_t nbin, size_t nchan,
-                     char *quantized, size_t nbit,
-                     float* dat_scl, float* dat_offs)
+inline void quantize(
+		double* data,
+		size_t ntime,      // e.g., nbin or nsblk
+		size_t nchan,
+		size_t npol,
+		char* quantized,
+		size_t nbit,
+		float* dat_scl,
+		float* dat_offs,
+		bool cmp = false)
 {
-    // --- 1. Per-thread min/max vectors (properly resized) ---
-    thread_local static std::vector<double> min_val, max_val;
-    if (min_val.size() != nchan) min_val.resize(nchan);
-    if (max_val.size() != nchan) max_val.resize(nchan);
+	size_t c = cmp ? 2 : 1;
+	size_t nsamp_total = ntime * nchan * npol * c;
 
-    const double inf = std::numeric_limits<double>::infinity();
-    std::fill(min_val.begin(), min_val.end(), inf);
-    std::fill(max_val.begin(), max_val.end(), -inf);
+	const double bit_range = static_cast<double>((1ULL << nbit) - 1);
+	const double inf = std::numeric_limits<double>::infinity();
 
-    const size_t nsamp = nbin * nchan;
-    const double bit_range = static_cast<double>((1ULL << nbit) - 1);
-
-    // --- 2. Compute per-channel min/max ---
-    for (size_t i = 0; i < nbin; ++i) 
+	// Stats per (chan, pol, cmplx)
+	size_t stats_size = nchan * npol * c;
+	thread_local static std::vector<double> min_val, max_val;
+	if (min_val.size() != stats_size) 
 	{
-		for (size_t f = 0; f < nchan; ++f) 
-		{
-			double val = data[i*nchan + f];
-			if (val < min_val[f]) min_val[f] = val;
-			if (val > max_val[f]) max_val[f] = val;
+		min_val.resize(stats_size, inf);
+		max_val.resize(stats_size, -inf);
+	} 
+	std::fill(min_val.begin(), min_val.end(), inf);
+	std::fill(max_val.begin(), max_val.end(), -inf);
+
+	// Traverse data in physical order: time → pol → chan → cmplx
+	for (size_t t = 0; t < ntime; ++t) {
+		for (size_t p = 0; p < npol; ++p) {
+			for (size_t f = 0; f < nchan; ++f) {
+				for (size_t comp = 0; comp < c; ++comp) {
+					size_t idx = ((t * npol + p) * nchan + f) * c + comp;
+					double val = data[idx];
+					size_t stat_idx = (f * npol + p) * c + comp; // ← key: group by (f,p,comp)
+					if (val < min_val[stat_idx]) min_val[stat_idx] = val;
+					if (val > max_val[stat_idx]) max_val[stat_idx] = val;
+				}
+			}
 		}
 	}
 
-
-
-	// --- 3. Compute scaling and offset ---
-	for (size_t f = 0; f < nchan; ++f) 
-	{
-		// Signed int → use midpoint
-		dat_offs[f] = static_cast<float>((min_val[f] + max_val[f]) / 2.0);
-		double range = max_val[f] - min_val[f];
-		dat_scl[f] = (range == 0.0) ? 1.0f : static_cast<float>(range / bit_range);
+	// Compute scale/offset per (chan, pol, cmplx)
+	for (size_t f = 0; f < nchan; ++f) {
+		for (size_t p = 0; p < npol; ++p) {
+			for (size_t comp = 0; comp < c; ++comp) {
+				size_t stat_idx = (f * npol + p) * c + comp;
+				dat_offs[stat_idx] = static_cast<float>((min_val[stat_idx] + max_val[stat_idx]) / 2.0);
+				double range = max_val[stat_idx] - min_val[stat_idx];
+				dat_scl[stat_idx] = (range == 0.0) ? 1.0f : static_cast<float>(range / bit_range);
+			}
+		}
 	}
 
-
-	std::fill(quantized, quantized + nsamp * nbit/8, 0.0);
+	// Zero output buffer
+	size_t nbytes = (nsamp_total * nbit + 7) / 8;
+	std::fill(quantized, quantized + nbytes, 0);
 
 	if (nbit == 16) 
 	{
-		// Fold mode: one sample = one int16_t (big-endian for FITS)
-		for (size_t i = 0; i < nsamp; ++i) 
+
+		for (size_t t = 0; t < ntime; ++t) 
 		{
-			size_t f = i % nchan;
-			double normilized = (data[i] - dat_offs[f]) / dat_scl[f];
-			int64_t q = std::llround(normilized);
+			for (size_t p = 0; p < npol; ++p) 
+			{
+				for (size_t f = 0; f < nchan; ++f) 
+				{
+					for (size_t comp = 0; comp < c; ++comp) 
+					{
+						size_t i = ((t * npol + p) * nchan + f) * c + comp;
+						size_t stat_idx = (f * npol + p) * c + comp;
 
-			uint16_t u = static_cast<uint16_t>(static_cast<int16_t>(q));
-
-			quantized[i*2 + 0] = u & 0xFF;
-			quantized[i*2 + 1] = (u >> 8) & 0xFF;
-        }
-    } 
+						double norm = (data[i] - dat_offs[stat_idx]) / dat_scl[stat_idx];
+						int16_t q = static_cast<int16_t>(std::llround(norm));
+						uint16_t u = static_cast<uint16_t>(q);
+						// Big-endian for FITS
+						quantized[i * 2 + 0] = u & 0xFF;
+						quantized[i * 2 + 1] = (u >> 8) & 0xFF;
+					}
+				}
+			}
+		}
+	} 
 	else 
 	{
-        // Search mode: nbit = 1,2,4,8 → pack into bytes, MSB first
-        int samples_per_byte = 8 / static_cast<int>(nbit);
+		int samples_per_byte = 8 / static_cast<int>(nbit);
+		long long left = -(1LL << (nbit-1));
+		long long right = (1LL << (nbit-1)) - 1LL;
 
-        for (size_t i = 0; i < nsamp; ++i) 
+		for (size_t t = 0; t < ntime; ++t) 
 		{
-			size_t f = i % nchan;
-			double normilized = (data[i] - dat_offs[f]) / dat_scl[f];
-            int64_t q = std::llround(normilized);
-            uint8_t sample = static_cast<uint8_t>(q);
+			for (size_t p = 0; p < npol; ++p) 
+			{
+				for (size_t f = 0; f < nchan; ++f) 
+				{
+					for (size_t comp = 0; comp < c; ++comp) 
+					{
+						size_t i = ((t * npol + p) * nchan + f) * c + comp;
+						size_t stat_idx = (f * npol + p) * c + comp;
 
-            size_t byte_idx = i / samples_per_byte;
-            int sample_in_byte = i % samples_per_byte;
-            int shift = 8 - nbit * (sample_in_byte + 1); // MSB first
+						double norm = (data[i] - dat_offs[stat_idx]) / dat_scl[stat_idx];
+						uint8_t sample = static_cast<uint8_t>(
+								std::clamp(std::llround(norm), left, right));
 
-            quantized[byte_idx] |= (sample << shift);
-        }
-    }
+						size_t byte_idx = i / samples_per_byte;
+						int pos_in_byte = i % samples_per_byte;
+						int shift = 8 - nbit * (pos_in_byte + 1); // MSB first
+						quantized[byte_idx] |= (sample << shift);
+					}
+				}
+			}
+		}
+	}
 }
 
 
@@ -330,13 +369,12 @@ bool PSRFITS_Writer::append_history(const size_t nsubint, const size_t npol, con
 	{
 		ctr_freq = (fmin + fmax) / 2.0;
     }
-
 	bw = std::abs(bw);
 	chan_bw = std::abs(chan_bw);
 
 	int dedisp = 1;
 
-	if (dds_mtd == "none")
+	if (dds_mtd == "none" || dds_mtd == "")
 		dedisp = 0;
 	else if (dds_mtd == "coherent" || dds_mtd == "incoherent")
 		dedisp = 1;
@@ -456,10 +494,16 @@ bool PSRFITS_Writer::append_subint_fold(
     std::vector<float> dat_scl(nchan * npol);
     std::vector<char> data_int(2*nbin * nchan * npol);
 
-	quantize(data_double, nbin, nchan, 
-			data_int.data(), 16,
-			dat_scl.data(), dat_offs.data());
-
+	quantize(
+			data_double,
+			nbin,        
+			nchan,
+			npol,
+			data_int.data(),
+			16,           // nbit = 16
+			dat_scl.data(),
+			dat_offs.data()
+			);
 
 	// transform array's flat C layout to FITS FORTRAN-style layout
 	const std::vector<size_t> dims = {nbin, nchan};
@@ -547,11 +591,12 @@ bool PSRFITS_Writer::append_subint_stream(
 
 	int nsblk = 4096;
 	int nbits = 8;
+	int c = cmp ? 2 : 1;
 
 	std::ifstream stream(stream_file);
     stream.seekg(0, std::ios::end);
     long nstot = static_cast<long>(stream.tellg()) / sizeof(double);
-	nstot = nstot / (nchan*npol);
+	nstot = nstot / (nchan*npol*c);
     stream.seekg(0, std::ios::beg);
 
 
@@ -564,9 +609,9 @@ bool PSRFITS_Writer::append_subint_stream(
 	char freq_form[32], wts_form[32], offs_form[32], scl_form[32], data_form[32];
 	snprintf(freq_form, sizeof(freq_form), "%dD", int(nchan));
 	snprintf(wts_form,  sizeof(wts_form),  "%dE", int(nchan));
-	snprintf(offs_form, sizeof(offs_form), "%dE", int(nchan * npol)); // usually nchan * 1
-	snprintf(scl_form,  sizeof(scl_form),  "%dE", int(nchan * npol));
-	snprintf(data_form, sizeof(data_form), "%dB", int((nsblk*nbits/8) * nchan * npol));
+	snprintf(offs_form, sizeof(offs_form), "%dE", int(nchan * npol * c)); // usually nchan * 1
+	snprintf(scl_form,  sizeof(scl_form),  "%dE", int(nchan * npol * c));
+	snprintf(data_form, sizeof(data_form), "%dB", int((nsblk*nbits/8) * nchan * npol * c));
 
 	const char* ttype[] = { "TSUBINT", "OFFS_SUB", "DAT_FREQ", "DAT_WTS", "DAT_OFFS", "DAT_SCL", "DATA" };
 	const char* tform[] = { "1D", "1D", freq_form, wts_form, offs_form, scl_form, data_form };
@@ -579,8 +624,8 @@ bool PSRFITS_Writer::append_subint_stream(
                     const_cast<char**>(tunit), // units
                     "SUBINT", &status);
 
-	int naxis = 3;
-	long naxes[3] = {long(nchan), long(npol), long(nsblk * nbits/8)};
+	int naxis = 4;
+	long naxes[4] = {long(c), long(nchan), long(npol), long(nsblk * nbits/8)};
 	fits_write_tdim(fptr, 7, naxis, naxes, &status);
 	
 	
@@ -603,7 +648,6 @@ bool PSRFITS_Writer::append_subint_stream(
     fits_write_key(fptr, TINT, "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
     fits_write_key(fptr, TINT, "NCH_STRT", new int(0), "Channel/sub-band offset for split files", &status);
 	double dB = std::abs(fmax - fmin) / double(nchan);
-	dB = cmp ? dB*2.0 : dB;
     fits_write_key(fptr, TDOUBLE, "CHAN_BW", &dB, "[MHz] Channel/sub-band width", &status);
     fits_write_key(fptr, TDOUBLE, "DM", (void*) &(dm), "[cm-3 pc] DM used for dedispersion", &status);
     fits_write_key(fptr, TDOUBLE, "RM", new double(0.0), "[rad m-2] RM for post-detection deFaraday", &status);
@@ -612,7 +656,7 @@ bool PSRFITS_Writer::append_subint_stream(
     fits_write_key(fptr, TINT, "NSTOT", &nstot, "Total number of samples (SEARCH mode, else 1)", &status); 
 
     fits_write_key(fptr, TINT, "EXTVER", new int(1), "auto assigned by template parser ", &status);
-    fits_write_key(fptr, TBYTE, "CMPLX",  (void*)&cmp, "is data complex (1/0)", &status);
+    fits_write_key(fptr, TINT, "CMPLX",  (void*)&cmp, "is data complex (1/0)", &status);
 
 
     // Prepare frequency array (linear spacing)
@@ -639,30 +683,39 @@ bool PSRFITS_Writer::append_subint_stream(
 
 
     // Prepare offset and double arrays for data
-    std::vector<float> dat_offs(nchan * npol);
-    std::vector<float> dat_scl(nchan * npol);
-    std::vector<char> data_int((nsblk*nbits/8) * nchan * npol);
-	double *data_double = new double[nsblk*nchan*npol];
+    std::vector<float> dat_offs(nchan * npol * c);
+    std::vector<float> dat_scl(nchan * npol * c);
+    std::vector<char> data_int((nsblk*nbits/8) * nchan * npol * c);
+	double *data_double = new double[nsblk*nchan*npol*c];
 
 	size_t actually_read = 0;
 
 
 	for (int row = 1; row <= nsubint; ++row)
 	{
-		stream.read(reinterpret_cast<char*>(data_double), sizeof(double)*nsblk*nchan*npol);
+		stream.read(reinterpret_cast<char*>(data_double), sizeof(double)*nsblk*nchan*npol*c);
 
 		// Check how many bytes were actually read
 		// transform it to bin steps
 		actually_read = static_cast<size_t>(stream.gcount());
-		actually_read /= (sizeof(double) * nchan * npol);
+		actually_read /= (sizeof(double) * nchan * npol * c);
+
 
 		if (actually_read < size_t(nsblk))
-			std::fill(data_double + actually_read*nchan*npol, data_double + nsblk*nchan*npol, 0.0);
+			std::fill(data_double + actually_read*nchan*npol*c, data_double + nsblk*nchan*npol*c, 0.0);
 
 
-		quantize(data_double, actually_read, nchan, 
-				data_int.data(), nbits,
-				dat_scl.data(), dat_offs.data());
+		quantize(
+				data_double,
+				actually_read,      
+				nchan,
+				npol,    
+				data_int.data(),
+				8,           // nbit = 16
+				dat_scl.data(),
+				dat_offs.data(),
+				cmp           // true if complex
+				);
 
 		// TSUBINT and OFFS_SUB 
 		double tsubint = tau * actually_read * 1.0e-3; // Total subint duration
@@ -676,11 +729,11 @@ bool PSRFITS_Writer::append_subint_stream(
 		fits_write_col(fptr, TFLOAT, 4, row, 1, nchan, dat_wts.data(), &status);
 
 		// DAT_OFFS, DAT_SCL
-		fits_write_col(fptr, TFLOAT, 5, row, 1, nchan * npol, dat_offs.data(), &status);
-		fits_write_col(fptr, TFLOAT, 6, row, 1, nchan * npol, dat_scl.data(), &status);
+		fits_write_col(fptr, TFLOAT, 5, row, 1, nchan * npol * c, dat_offs.data(), &status);
+		fits_write_col(fptr, TFLOAT, 6, row, 1, nchan * npol * c, dat_scl.data(), &status);
 
-		// DATA (int16)
-		fits_write_col(fptr, TBYTE, 7, row, 1, (actually_read*nbits/8) * nchan * npol, (void*) data_int.data(), &status);
+		// DATA
+		fits_write_col(fptr, TBYTE, 7, row, 1, (actually_read*nbits/8) * nchan * npol * c, (void*) data_int.data(), &status);
 	}
 
 
@@ -723,6 +776,7 @@ bool PSRFITS_Writer::append_subint_search(
 
 	int nsblk = 4096;
 	int nbits = 8;
+	int c = cmp ? 2 : 1;
 
 	size_t nstot = nbin;
 
@@ -734,9 +788,9 @@ bool PSRFITS_Writer::append_subint_search(
 	char freq_form[32], wts_form[32], offs_form[32], scl_form[32], data_form[32];
 	snprintf(freq_form, sizeof(freq_form), "%dD", int(nchan));
 	snprintf(wts_form,  sizeof(wts_form),  "%dE", int(nchan));
-	snprintf(offs_form, sizeof(offs_form), "%dE", int(nchan * npol)); // usually nchan * 1
-	snprintf(scl_form,  sizeof(scl_form),  "%dE", int(nchan * npol));
-	snprintf(data_form, sizeof(data_form), "%dB", int((nsblk*nbits/8) * nchan * npol));
+	snprintf(offs_form, sizeof(offs_form), "%dE", int(nchan * npol * c)); // usually nchan * 1
+	snprintf(scl_form,  sizeof(scl_form),  "%dE", int(nchan * npol * c));
+	snprintf(data_form, sizeof(data_form), "%dB", int((nsblk*nbits/8) * nchan * npol * c));
 
 	const char* ttype[] = { "TSUBINT", "OFFS_SUB", "DAT_FREQ", "DAT_WTS", "DAT_OFFS", "DAT_SCL", "DATA" };
 	const char* tform[] = { "1D", "1D", freq_form, wts_form, offs_form, scl_form, data_form };
@@ -749,8 +803,8 @@ bool PSRFITS_Writer::append_subint_search(
                     const_cast<char**>(tunit), // units
                     "SUBINT", &status);
 
-	int naxis = 3;
-	long naxes[3] = {long(nchan), long(npol), long(nsblk * nbits/8)};
+	int naxis = 4;
+	long naxes[4] = {long(c), long(nchan), long(npol), long(nsblk * nbits/8)};
 	fits_write_tdim(fptr, 7, naxis, naxes, &status);
 	
 	
@@ -771,7 +825,6 @@ bool PSRFITS_Writer::append_subint_search(
     fits_write_key(fptr, TINT, "NSUBOFFS", new int(0), "Subint offset (Contiguous SEARCH-mode files)", &status); 
     fits_write_key(fptr, TINT, "NCHAN", (void*) &nchan, "Number of channels/sub-bands in this file", &status); 
 	double dB = std::abs(fmax - fmin) / double(nchan);
-	dB = cmp ? dB*2.0 : dB;
     fits_write_key(fptr, TDOUBLE, "CHAN_BW", &dB, "[MHz] Channel/sub-band width", &status);
     fits_write_key(fptr, TDOUBLE, "DM", (void*) &(dm), "[cm-3 pc] DM used for dedispersion", &status);
     fits_write_key(fptr, TDOUBLE, "RM", new double(0.0), "[rad m-2] RM for post-detection deFaraday", &status);
@@ -807,9 +860,9 @@ bool PSRFITS_Writer::append_subint_search(
 
 
     // Prepare offset and double arrays for data
-    std::vector<float> dat_offs(nchan * npol);
-    std::vector<float> dat_scl(nchan * npol);
-    std::vector<char> data_int(nsblk / (8/nbits) * nchan * npol);
+    std::vector<float> dat_offs(nchan * npol * c);
+    std::vector<float>  dat_scl(nchan * npol * c);
+    std::vector<char> data_int(nsblk / (8/nbits) * nchan * npol * c);
 
 	size_t actually_read = 0;
 
@@ -821,10 +874,17 @@ bool PSRFITS_Writer::append_subint_search(
 		// Check how many time steps are available
 		actually_read = std::min(size_t(nsblk), nstot - buf_pos);
 		
-		quantize(data_double + buf_pos*nchan*npol, 
-				actually_read, nchan, 
-				data_int.data(), nbits,
-				dat_scl.data(), dat_offs.data());
+		quantize(
+				data_double,
+				actually_read,
+				nchan,
+				npol,       
+				data_int.data(),
+				8, 
+				dat_scl.data(),
+				dat_offs.data(),
+				cmp  
+				);
 
 		buf_pos += actually_read;
 
@@ -840,11 +900,11 @@ bool PSRFITS_Writer::append_subint_search(
 		fits_write_col(fptr, TFLOAT, 4, row, 1, nchan, dat_wts.data(), &status);
 
 		// DAT_OFFS, DAT_SCL
-		fits_write_col(fptr, TFLOAT, 5, row, 1, nchan * npol, dat_offs.data(), &status);
-		fits_write_col(fptr, TFLOAT, 6, row, 1, nchan * npol, dat_scl.data(), &status);
+		fits_write_col(fptr, TFLOAT, 5, row, 1, nchan * npol * c, dat_offs.data(), &status);
+		fits_write_col(fptr, TFLOAT, 6, row, 1, nchan * npol * c, dat_scl.data(), &status);
 
 		// DATA
-		fits_write_col(fptr, TBYTE, 7, row, 1, (actually_read*nbits/8) * nchan * npol, (void*) data_int.data(), &status);
+		fits_write_col(fptr, TBYTE, 7, row, 1, (actually_read*nbits/8) * nchan * npol * c, (void*) data_int.data(), &status);
 	}
 
 	append_history(

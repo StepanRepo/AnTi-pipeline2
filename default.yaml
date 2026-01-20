@@ -1,5 +1,5 @@
 general:
-  mode: "search"
+  mode: "stream"
   input_dir: "data"
   output_dir: "data"
   parfile: "0531.par"
@@ -7,8 +7,8 @@ general:
   verbose: 1
   buf_size: 10
 
-  t0: 147.55
-  t1: 147.65
+  #t0: 147.55
+  #t1: 147.65
   
   save_raw: false
   save_dyn: true
@@ -23,7 +23,7 @@ options:
   #t2pred: "t2pred.dat"
 
   nchann: 33554432
-  #nchann: 2048
+  #nchann: 4096
   #nchann: 512
 
   bl_window: 300.0e-6
@@ -49,7 +49,7 @@ advanced:
   dm: 56.7712
 
 files:
-  - dyn_rup103_bv_055-0612_ch01_1.fits
+  - sum_rup103_bv_055-0612_ch01.fits
   #- Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif
   #- rup103_bv_055-0550_ch01.vdif
   #- rup103_bv_055-0601_ch01.vdif
