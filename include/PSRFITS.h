@@ -40,6 +40,7 @@ class PSRFITSHeader : public BaseHeader
 		std::string MODE;
 		size_t nsblk;
 		size_t nbits;
+		int sign;
 
 		PSRFITSHeader();
 		void fill(fitsfile *fptr, int *status);

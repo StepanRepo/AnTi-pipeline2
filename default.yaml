@@ -1,5 +1,5 @@
 general:
-  mode: "search"
+  mode: "stream"
   input_dir: "data"
   output_dir: "data"
   parfile: "0531.par"
@@ -18,12 +18,12 @@ general:
 
 options:
 
-  ddtype: "coherent"
+  ddtype: "incoherent"
 
   #t2pred: "t2pred.dat"
 
-  nchann: 33554432
-  #nchann: 4096
+  #nchann: 33554432
+  nchann: 4096
   #nchann: 512
 
   bl_window: 300.0e-6
@@ -34,7 +34,7 @@ options:
   filter: true
   tail_threshold: .3
   std_threshold: 30.0
-  downsample: 4096
+  #downsample: 4096
   max_len: 100000
 
   
@@ -49,11 +49,11 @@ advanced:
   dm: 56.7712
 
 files:
-  #- sum_rup103_bv_055-0612_ch01.fits
+  - dyn_rup103_bv_055-0612_ch01.fits
   #- Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif
   #- rup103_bv_055-0550_ch01.vdif
   #- rup103_bv_055-0601_ch01.vdif
-  - rup103_bv_055-0612_ch01.vdif
+  #- rup103_bv_055-0612_ch01.vdif
   #- rup103_bv_055-0623_ch01.vdif
   #- rup103_bv_055-0634_ch01.vdif
   #- rup103_bv_055-0645_ch01.vdif

@@ -30,6 +30,64 @@ void read_key_bin(fitsfile *fptr, int datatype, std::string key, long firstrow, 
 	fits_read_col(fptr, datatype, colum, firstrow, firstelem, nelements, nulval, array, anynull, status);
 }
 
+void read_data(
+		fitsfile *fptr, 
+		int KIND, 
+		size_t subint_index, 
+		size_t subint_pos,
+		int8_t *raw_data,
+		double *data,
+		int *status,
+		size_t nbin, size_t npol, size_t nchann, size_t c
+		)
+{
+	int anynull;
+	size_t sample_size = npol*nchann*c;
+
+	thread_local std::vector<float> dat_scl, dat_offs, dat_wts;
+	if(dat_scl.size() != npol*nchann*c) dat_scl.resize(npol*nchann*c);
+	if(dat_offs.size() != npol*nchann*c) dat_offs.resize(npol*nchann*c);
+	if(dat_wts.size() != nchann) dat_wts.resize(nchann);
+
+	read_key_bin(
+			fptr, KIND, "DATA", 
+			subint_index, subint_pos, nbin*sample_size, 
+			NULL, raw_data, &anynull, status);
+
+	read_key_bin(
+			fptr, TFLOAT, "DAT_WTS", 
+			subint_index, 1, nchann, 
+			NULL, dat_wts.data(), &anynull, status);
+
+	read_key_bin(
+			fptr, TFLOAT, "DAT_OFFS", 
+			subint_index, 1, nchann*npol*c, 
+			NULL, dat_offs.data(), &anynull, status);
+
+	read_key_bin(
+			fptr, TFLOAT, "DAT_SCL", 
+			subint_index, 1, nchann*npol*c, 
+			NULL, dat_scl.data(), &anynull, status);
+
+	for (size_t t = 0; t < nbin; ++t) 
+	{
+		for (size_t p = 0; p < npol; ++p) 
+		{
+			for (size_t f = 0; f < nchann; ++f) 
+			{
+				for (size_t comp = 0; comp < c; ++comp) 
+				{
+					size_t idx = ((t * npol + p) * nchann + f) * c + comp;
+					size_t stat_idx = (f * npol + p) * c + comp; 
+
+					data[idx] = double (raw_data[idx]) * double(dat_scl[stat_idx]) \
+							   + double (dat_offs[stat_idx]);
+				}
+			}
+		}
+	}
+
+}
 
 PSRFITSHeader::PSRFITSHeader(): 
 	BaseHeader()
@@ -108,6 +166,8 @@ void PSRFITSHeader::fill(fitsfile *fptr, int *status)
 		nbits = 16;
 	}
 
+	fits_read_key(fptr, TINT, "SIGNINT", &sign, NULL, status);
+
 	// timing information about every subint
 	t_subint = new double[nsubint];
 
@@ -185,11 +245,14 @@ PSRFITS::PSRFITS(const std::string& filename_in, size_t buffer_size):
     }
 
     fft_arr = nullptr;
+
+	// Set the file to the data
+	char char_subint[] = "SUBINT";
+	fits_movnam_hdu(fptr, BINARY_TBL, char_subint, 0, &status);
 }
 
 PSRFITS::~PSRFITS() 
 {
-
     if (is_open) 
 	{
 		fits_close_file(fptr, &status);
@@ -218,6 +281,10 @@ bool PSRFITS::fill_buffer()
 	size_t nchann = header.nchann;
 	size_t c = header.cmplx ? 2 : 1;
 	size_t nbits = header.nbits;
+	int anynull;
+
+	size_t sample_size = npol*nchann*c;
+	int KIND = (header.MODE == "SEARCH") ? TBYTE : TSHORT;
 
 	// Shift remaining data (from a previous incomplete 
 	// processing chunk) to the front of the buffer
@@ -235,79 +302,79 @@ bool PSRFITS::fill_buffer()
 
 	if (subint_index >= nsubint) return false;
 
-	thread_local std::vector<float> dat_scl, dat_offs, dat_wts;
-	if(dat_scl.size() != npol*nchann*c) dat_scl.resize(npol*nchann*c);
-	if(dat_offs.size() != npol*nchann*c) dat_offs.resize(npol*nchann*c);
-	if(dat_wts.size() != nchann) dat_wts.resize(nchann);
 
 
 	// Clamp to actual available space
-	size_t data_read_so_far = ((subint_index-1)*nbin + subint_pos-1)*npol*nchann*c;
+	size_t data_read_so_far = ((subint_index-1)*nbin + subint_pos-1)*sample_size;
     size_t space_avail = buf_size - buf_max;
+	size_t subint_to_read = (space_avail - (nbin-subint_pos+1)*sample_size) / nbin/sample_size;
 
-	size_t subint_to_read = (buf_size - (nbin-subint_pos+1)) / nbin;
-	int anynull;
-
-	// TSHORT
 	if (subint_pos > 1)
 	{
-		read_key_bin(
-				fptr, TBYTE, "DATA", 
-				subint_index, subint_pos, (nbin - (subint_pos-1))*npol*nchann*c, 
-				NULL, raw_data + buf_max, &anynull, &status);
+		read_data(
+				fptr, 
+				KIND, 
+				subint_index, 
+				subint_pos,
+				raw_data + buf_max,
+				buffer + buf_max,
+				&status,
+				nbin - (subint_pos-1), npol, nchann, c
+				);
 
-		buf_max += (nbin - (subint_index-1))*npol*nchann*c;
+		buf_max += (nbin - (subint_pos-1))*sample_size;
 		subint_index += 1;
 		subint_pos = 1;
 	}
 
 	for (size_t i = 0; i < subint_to_read; ++i)
 	{
-		read_key_bin(
-				fptr, TBYTE, "DATA", 
-				subint_index, subint_pos, nbin*npol*nchann*c, 
-				NULL, raw_data + buf_max, &anynull, &status);
+		read_data(
+				fptr, 
+				KIND, 
+				subint_index, 
+				subint_pos,
+				raw_data + buf_max,
+				buffer + buf_max,
+				&status,
+				nbin - (subint_pos-1), npol, nchann, c
+				);
 
-
-		read_key_bin(
-				fptr, TFLOAT, "DAT_WTS", 
-				subint_index, 1, nchann, 
-				NULL, dat_wts.data(), &anynull, &status);
-
-		read_key_bin(
-				fptr, TFLOAT, "DAT_OFFS", 
-				subint_index, 1, nchann*npol*c, 
-				NULL, dat_offs.data(), &anynull, &status);
-
-		read_key_bin(
-				fptr, TFLOAT, "DAT_SCL", 
-				subint_index, 1, nchann*npol*c, 
-				NULL, dat_scl.data(), &anynull, &status);
-
-
-		buf_max += nbin*npol*nchann*c;
+		buf_max += nbin*sample_size;
 		subint_index += 1;
 		subint_pos = 1;
 
 		if (subint_index >= nsubint) break; // EOF
-		if (buf_max + nbin*npol*nchann*c > buf_size) break; // buffer is full
+		if (buf_max + sample_size > buf_size) break; // buffer is full
 	}
 
-	data_read_so_far = ((subint_index-1)*nbin + subint_pos-1)*npol*nchann*c;
+	data_read_so_far = ((subint_index-1)*nbin + subint_pos-1)*sample_size;
 	space_avail = buf_size - buf_max;
 
-	size_t to_process = std::min(header.OBS_SIZE*npol*nchann*c - data_read_so_far, space_avail);
-	to_process /= npol*nchann*c;
+	size_t to_add = std::min(header.OBS_SIZE*sample_size - data_read_so_far, space_avail);
+	to_add /= sample_size;
 
-	read_key_bin(
-			fptr, TBYTE, "DATA", 
-			subint_index, subint_pos, to_process*npol*nchann*c, 
-			NULL, raw_data + buf_max, &anynull, &status);
 
-	buf_max += nbin*npol*nchann*c;
-	subint_pos = to_process+1;
+	read_data(
+			fptr, 
+			KIND, 
+			subint_index, 
+			subint_pos,
+			raw_data + buf_max,
+			buffer + buf_max,
+			&status,
+			to_add, npol, nchann, c
+			);
+
+	buf_max += to_add*sample_size;
+	subint_pos = 1+to_add;
 
 	check_status("Filling Buffer");
+
+	std::ofstream test("data/test.bin");
+	test.write((char*) buffer, sizeof(double)*buf_max);
+	test.close();
+
 	return false;
 }
 
