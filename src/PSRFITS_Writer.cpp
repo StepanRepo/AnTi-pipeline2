@@ -875,7 +875,7 @@ bool PSRFITS_Writer::append_subint_search(
 		actually_read = std::min(size_t(nsblk), nstot - buf_pos);
 		
 		quantize(
-				data_double,
+				data_double + buf_pos*npol*nchan*c,
 				actually_read,
 				nchan,
 				npol,       
