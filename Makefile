@@ -19,15 +19,16 @@ CXXFLAGS += $(DEBUG)
 
 # Include directories (paths where the compiler looks for header files)
 # The -I flag tells the compiler where to find #include files
-INCLUDES = -I./include -I$(TEMPO2_PREFIX)/include 
+INCLUDES = -I./include -I$(TEMPO2_PREFIX)/include -I/home/gpps/pulsar_software/include -I./libs/
 
 # Library flags (paths where the linker looks for libraries and the libraries themselves)
 # -L flag for library paths, -l flag for library names
 # Example: -L/path/to/lib -lfftw3
 LIBS = -lstdc++fs -lfftw3 -lyaml-cpp -ltempo2pred -ltempo2 -lcfitsio
-LIBS += -L$(TEMPO2_PREFIX)/lib 
+LIBS += -L$(TEMPO2_PREFIX)/lib -L./libs/
 
-RPATHS = -Wl,-rpath,$(TEMPO2_PREFIX)/lib
+RPATHS = -Wl,-rpath,$(TEMPO2_PREFIX)/lib -Wl,-rpath,./libs/
+
 
 # --- Source and Build Directories ---
 SRCDIR = src
@@ -86,10 +87,26 @@ check: $(TARGET)
 	valgrind --leak-check=full \
          --show-leak-kinds=all \
          --track-origins=yes \
-         $(TARGET)
+         ./$(TARGET)
+# --- Minimal self-contained PSRFITS writer library ---
+LIB_TARGET = libpsrfits_writer.so
+LIB_SOURCES = \
+	$(SRCDIR)/PSRFITS_Writer.cpp \
+	$(SRCDIR)/BaseHeader.cpp \
+	$(SRCDIR)/aux_math.cpp
+LIB_OBJECTS = $(LIB_SOURCES:$(SRCDIR)/%.cpp=$(BUILDDIR)/lib/%.o)
 
+.PHONY: libpsrfits clean-lib
 
-# --- Phony Targets ---
-# These targets do not correspond to files, so make should always run them
-.PHONY: all clean check
+libpsrfits: $(LIB_TARGET)
 
+$(LIB_TARGET): $(LIB_OBJECTS)
+	@mkdir -p $(dir $@)
+	$(CXX) -fPIC $(CXXFLAGS) $(INCLUDES) -shared -Wl,--export-dynamic $(LIB_OBJECTS) -lcfitsio -o $@
+
+$(BUILDDIR)/lib/%.o: $(SRCDIR)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -fPIC $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+clean-lib:
+	rm -rf $(BUILDDIR)/lib $(LIB_TARGET)

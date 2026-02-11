@@ -56,11 +56,11 @@ class vml_assign_traits {
                                                    : int(Dst::MaxRowsAtCompileTime),
     MaxSizeAtCompileTime = Dst::SizeAtCompileTime,
 
-    MightEnableVml = bool(StorageOrdersAgree) && bool(DstHasDirectAccess) && bool(SrcHasDirectAccess) &&
+    MightEnableVml = StorageOrdersAgree && DstHasDirectAccess && SrcHasDirectAccess &&
                      Src::InnerStrideAtCompileTime == 1 && Dst::InnerStrideAtCompileTime == 1,
-    MightLinearize = bool(MightEnableVml) && (int(Dst::Flags) & int(Src::Flags) & LinearAccessBit),
-    VmlSize = bool(MightLinearize) ? MaxSizeAtCompileTime : InnerMaxSize,
-    LargeEnough = (VmlSize == Dynamic) || VmlSize >= EIGEN_MKL_VML_THRESHOLD
+    MightLinearize = MightEnableVml && (int(Dst::Flags) & int(Src::Flags) & LinearAccessBit),
+    VmlSize = MightLinearize ? MaxSizeAtCompileTime : InnerMaxSize,
+    LargeEnough = VmlSize == Dynamic || VmlSize >= EIGEN_MKL_VML_THRESHOLD
   };
 
  public:

@@ -85,3 +85,4 @@ class PRAO_adc : public BaseReader
 };
 
 #endif // PRAO_ADC_H
+

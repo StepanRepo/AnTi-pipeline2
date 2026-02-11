@@ -13,8 +13,6 @@
 #include <iostream>   // For std::cerr, std::endl
 #include <iomanip>    // For std::setprecision
 #include <cstring>    // For std::memcpy, std::memmove
-#include <limits>     // For std::numeric_limits (if needed for validation)
-#include <algorithm>  // For std::min (if needed for safer copying)
 #include <filesystem> // For std::filesystem::path.stem()
 					  
 
@@ -275,6 +273,8 @@ IAA_vdif::IAA_vdif(const std::string& filename_in, size_t buffer_size):
 		header.t0 = header.t; // Store the time of the first frame for relative calculations
 		header.nchann = 1;
 		header.tau = 1e-3/header.sampling;
+		header.npol = 1;
+
 
 		// Find the total size of observation (number of points)
 		file.seekg(0, std::ios::end); // Move the read pointer to the end of the file
@@ -340,18 +340,6 @@ IAA_vdif::~IAA_vdif()
 	{
 		delete[] buffer;
 		buffer = nullptr;
-	}
-
-	// Clean up FFTW resources
-	if (p != nullptr) 
-	{
-		fftw_destroy_plan(p);
-		p = nullptr;
-	}
-	if (fft_arr != nullptr) 
-	{
-		fftw_free(fft_arr);
-		fft_arr = nullptr;
 	}
 }
 
@@ -531,14 +519,6 @@ void IAA_vdif::reset()
 	// Reset the file state
 	file.clear();
 	file.seekg(data_start_pos, std::ios::beg);
-
-	// Delete Fourier information
-	if (fft_arr)
-	{
-		fftw_destroy_plan(p);
-		fftw_free(fft_arr);
-		fft_arr = nullptr;
-	}
 
 	// Reset the buffer state
 	buf_pos = 0;

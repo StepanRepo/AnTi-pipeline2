@@ -49,10 +49,12 @@ struct packet_traits<numext::int32_t> : default_packet_traits {
     HasNegate = 1,
     HasAbs = 1,
     HasArg = 0,
+    HasAbs2 = 1,
     HasMin = 1,
     HasMax = 1,
     HasConj = 1,
     HasSetLinear = 0,
+    HasBlend = 0,
     HasReduxp = 0  // Not implemented in SVE
   };
 };
@@ -342,10 +344,12 @@ struct packet_traits<float> : default_packet_traits {
     HasNegate = 1,
     HasAbs = 1,
     HasArg = 0,
+    HasAbs2 = 1,
     HasMin = 1,
     HasMax = 1,
     HasConj = 1,
     HasSetLinear = 0,
+    HasBlend = 0,
     HasReduxp = 0,  // Not implemented in SVE
 
     HasDiv = 1,

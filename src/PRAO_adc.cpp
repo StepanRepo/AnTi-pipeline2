@@ -8,11 +8,13 @@
  */
 
 #include "PRAO_adc.h" // Include the header file defining the class interface and base classes
+#include <csignal>
+#include <cstddef>
+#include <cstdint>
 #include <stdexcept>  // For std::runtime_error, std::invalid_argument, std::bad_alloc
 #include <iostream>   // For std::cerr, std::endl
 #include <iomanip>    // For std::setprecision
 #include <cstring>    // For std::memcpy, std::memmove, std::strlcpy
-#include <limits>     // For std::numeric_limits (if needed for validation)
 #include <algorithm>  // For std::min, std::fill_n, std::remove_if
 #include <cctype>     // For std::isspace
 #include <fftw3.h>    // For FFTW library types (fftw_complex, fftw_plan)
@@ -222,10 +224,18 @@ void ADCHeader::decode(const char* h_buff)
     // sampling rate is wrong in the file's header
     // it is 200 ns
 	nchann = 1;
+	npol = 1;
 	nsubint = 1;
 	MODE = "SEARCH";
 	tau = 200.089e-6; // !!! NEED PRECISE VALUE. CONTACT CONSTRUCTORS !!!
     sampling = 1.0e-3 / tau; // Recalculate sampling rate in MHz based on corrected tau
+
+	double df = (fmax-fmin)/double(nchann);
+	freqs = new double[nchann];
+
+	for (size_t i = 0; i < nchann; ++i)
+		freqs[i] = fmin + df * (double(i) + .5);
+
 }
 
 // Implementation of the ADCHeader::print method.
@@ -310,6 +320,7 @@ PRAO_adc::PRAO_adc(const std::string& filename_in, size_t buffer_size):
     // 8 parts (bytes) goes to double data
     // 1 part (byte) goes to int8_t raw_data
     buf_size = buffer_size / (sizeof(double) + sizeof(int8_t));
+	buf_size = std::max(buf_size, header.OBS_SIZE);
 
     try 
 	{
@@ -329,8 +340,6 @@ PRAO_adc::PRAO_adc(const std::string& filename_in, size_t buffer_size):
 		buffer = nullptr;
         throw; // Re-throw to signal failure
     }
-
-    fft_arr = nullptr;
 }
 
 // Destructor implementation.
@@ -352,18 +361,6 @@ PRAO_adc::~PRAO_adc() {
 	{
         delete[] buffer;
         buffer = nullptr;
-    }
-
-    // Clean up FFTW resources
-    if (p != nullptr) 
-	{
-        fftw_destroy_plan(p);
-        p = nullptr;
-    }
-    if (fft_arr != nullptr) 
-	{
-        fftw_free(fft_arr);
-        fft_arr = nullptr;
     }
 }
 
@@ -442,7 +439,12 @@ void PRAO_adc::skip(double sec)
 		throw ("The file was not opened"); 
 
 	size_t steps = sec * (header.sampling * 1.0e6);
-    file.seekg(steps * sizeof(int8_t), std::ios::cur);
+
+    file.seekg(
+			data_start_pos + 
+			static_cast<std::streamoff>(steps * sizeof(int8_t)), 
+			std::ios::beg);
+
 	header.t0 += steps / (header.sampling * 1.0e6) / 86400.0;
 	data_start_pos = file.tellg(); // Update effective start
 }	

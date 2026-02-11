@@ -72,6 +72,7 @@ struct packet_traits<std::complex<float> > : default_packet_traits {
     HasAbs2 = 0,
     HasMin = 0,
     HasMax = 0,
+    HasBlend = 1,
     HasSetLinear = 0
   };
 };
@@ -468,6 +469,14 @@ EIGEN_STRONG_INLINE void ptranspose(PacketBlock<Packet2cf, 2>& kernel) {
   kernel.packet[1].cd[0] = tmp;
 }
 
+template <>
+EIGEN_STRONG_INLINE Packet2cf pblend(const Selector<2>& ifPacket, const Packet2cf& thenPacket,
+                                     const Packet2cf& elsePacket) {
+  Packet2cf result;
+  const Selector<4> ifPacket4 = {ifPacket.select[0], ifPacket.select[0], ifPacket.select[1], ifPacket.select[1]};
+  result.v = pblend<Packet4f>(ifPacket4, thenPacket.v, elsePacket.v);
+  return result;
+}
 #else
 template <>
 EIGEN_STRONG_INLINE Packet2cf pcmp_eq(const Packet2cf& a, const Packet2cf& b) {
@@ -544,6 +553,14 @@ EIGEN_STRONG_INLINE void ptranspose(PacketBlock<Packet2cf, 2>& kernel) {
   kernel.packet[0].v = tmp;
 }
 
+template <>
+EIGEN_STRONG_INLINE Packet2cf pblend(const Selector<2>& ifPacket, const Packet2cf& thenPacket,
+                                     const Packet2cf& elsePacket) {
+  Packet2cf result;
+  result.v = reinterpret_cast<Packet4f>(
+      pblend<Packet2d>(ifPacket, reinterpret_cast<Packet2d>(thenPacket.v), reinterpret_cast<Packet2d>(elsePacket.v)));
+  return result;
+}
 #endif
 
 }  // end namespace internal

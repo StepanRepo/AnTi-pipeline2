@@ -11,3 +11,6 @@ nohup.out
 search_res/*
 rup103/*
 tmp/*
+libs/*
+include/Eigen/*
+include/unsupported/*

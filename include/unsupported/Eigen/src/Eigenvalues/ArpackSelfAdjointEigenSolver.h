@@ -454,16 +454,8 @@ ArpackGeneralizedSelfAdjointEigenSolver<MatrixType, MatrixSolver, BisSPD>::compu
     }
   }
 
-  if (!(mode == 1 && isBempty) && !(mode == 2 && isBempty) && OP.info() != Success) {
-    m_info = OP.info() delete[] v;
-    delete[] iparam;
-    delete[] ipntr;
-    delete[] workd;
-    delete[] workl;
-    delete[] resid;
-    m_isInitialized = false;
-    return *this;
-  }
+  if (!(mode == 1 && isBempty) && !(mode == 2 && isBempty) && OP.info() != Success)
+    std::cout << "Error factoring matrix" << std::endl;
 
   do {
     internal::arpack_wrapper<Scalar, RealScalar>::saupd(&ido, bmat, &n, whch, &nev, &tol, resid, &ncv, v, &ldv, iparam,
@@ -580,7 +572,7 @@ ArpackGeneralizedSelfAdjointEigenSolver<MatrixType, MatrixSolver, BisSPD>::compu
   delete[] workl;
   delete[] resid;
 
-  m_isInitialized = (m_info == Success);
+  m_isInitialized = true;
 
   return *this;
 }

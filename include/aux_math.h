@@ -6,7 +6,13 @@
 #include <cstddef>
 #include <vector>
 
+// C mathematical functions
+#include <numeric>
+#include <cmath>
+#include <algorithm>
+
 #include <fftw3.h>      // For FFTW library types (fftw_complex, fftw_plan)
+
 
 namespace math
 {
@@ -46,6 +52,8 @@ namespace math
 	void gaussian_kernel(double* x, size_t n, double fwhm);
 	void box_conv(double* x, double* out, size_t win, size_t n);
 
+	void ccf(double* x, double *y, size_t n1, size_t n2, double *res);
+
     // --- Freq-domain profile processing ---
 
     // --- FITS Layout Conversion ---
@@ -54,7 +62,11 @@ namespace math
 	template<typename T>
     void layout_c_to_f(T* src, const std::vector<size_t>& shape);
 
+	// Cleanup function to avoid memory leaks
+	void cleanup();
+
 
 } // namespace math
 
 #endif // AUX_MATH_H
+

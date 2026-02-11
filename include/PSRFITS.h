@@ -1,4 +1,4 @@
-#ifndef PARFITS_H
+#ifndef PSRFITS_H
 #define PSRFITS_H
 
 
@@ -7,17 +7,10 @@ extern "C" {
 #include <fitsio.h>
 }
 
-#include <fstream>      // For std::ifstream, file operations
-#include <vector>       // For std::vector
 #include <string>       // For std::string
 #include <cstdint>      // For fixed-width integer types (uint32_t, uint8_t, etc.)
-#include <iostream>     // For std::cout, std::cerr, std::endl
-#include <iomanip>      // For std::setprecision
 #include <fftw3.h>      // For FFTW library types (fftw_complex, fftw_plan)
-#include <complex>      // For std::complex
 #include <cstring>      // For std::memcpy, std::memmove, std::strlcpy
-#include <stdexcept>    // For std::runtime_error, std::invalid_argument, std::out_of_range
-#include <algorithm>    // For std::min, std::fill_n
 
 // Include the base class templates.
 #include "BaseReader.h" // Defines BaseReader
@@ -44,7 +37,7 @@ class PSRFITSHeader : public BaseHeader
 
 		PSRFITSHeader();
 		void fill(fitsfile *fptr, int *status);
-		void print() const override;
+		//void print() const override;
 
 };
 
@@ -55,6 +48,7 @@ class PSRFITS : public BaseReader
 		int status;
 
 		size_t subint_index, subint_pos;
+		size_t start_subint_index, start_subint_pos;
 
 		int8_t* raw_data;
 		bool fill_buffer() override;

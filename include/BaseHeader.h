@@ -24,6 +24,7 @@ class BaseHeader
 		double sampling = 0.0;      // Sampling rate in MHz
 		double tau = 0.0;			// Temporal resolution in ms (1/sampling)
 		double fmin = 0.0, fmax = 0.0, fcomp = 0.0;
+		double *freqs = nullptr;
 
 		// file description
 		bool cmplx = false;
@@ -38,12 +39,18 @@ class BaseHeader
 		std::string cheb_file = "";
 		size_t obs_window = 0;
 
+		//Default constructor
+		BaseHeader() = default;
+
 		// Virtual destructor for safe polymorphism
-		virtual ~BaseHeader() = default;
+		BaseHeader(const BaseHeader&) = delete;
+		BaseHeader& operator=(const BaseHeader&) = delete;
+		virtual ~BaseHeader();
 
 		// Common interface methods 
-		virtual void print() const = 0;
+		virtual void print() const;
 		void update_header(std::string key, std::string value);
 };
 
 #endif // BASE_HEADER_H
+

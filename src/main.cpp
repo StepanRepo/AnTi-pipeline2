@@ -1,5 +1,6 @@
 // main.cpp
 #include <iostream>
+#include <ostream>
 #include <string>
 #include <algorithm>
 #include <stdexcept>
@@ -85,6 +86,10 @@ std::string get_format(const std::string &filename)
 			filename.substr(filename.length() - 3) == "adc") 
 	{
 		return "PRAO_adc";
+	}
+	if (filename.length() >= 5 && 
+			filename.substr(filename.length() - 5) == ".lpa3") {
+		return "PRAO_lpa3";
 	}
 	if (filename.length() >= 5 && 
 			filename.substr(filename.length() - 5) == ".vdif") {
@@ -188,8 +193,9 @@ int main()
 	output_dir = resolve_path(output_dir);
 
 
+	int def = 1;
 	read_key<std::string>("site", &site, config["general"]);
-	read_key<int>("verbose", &verbose, config["general"], new int(1));
+	read_key<int>("verbose", &verbose, config["general"], &def);
 
 	t0 = -1.0;
 	t1 = -1.0;
@@ -243,12 +249,14 @@ int main()
 		{
 			for (const auto& kv : config["advanced"]) 
 			{
+
 				const std::string key = kv.first.as<std::string>();
 				const std::string value = kv.second.as<std::string>();
 
 				hdr -> update_header(key, value);
 			}
 		}
+
 
 
 
@@ -317,8 +325,9 @@ int main()
 
 			read_key<size_t>("nchann", &nchann, config["options"], &nchann);
 			read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
-
 			load_mask(profile, config);
+
+
 
 			if (ddtype == "incoherent")
 			{
@@ -333,17 +342,7 @@ int main()
 				throw("Unknown type of de-dispersion: " + config["options"]["ddtype"].as<std::string>());
 			}
 
-		}
-		else if (mode == "stream")
-		{
-			size_t nchann = 0;
-			std::string ddtype = "";
 
-
-			read_key<size_t>("nchann", &nchann, config["options"], &nchann);
-			read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
-
-			load_mask(profile, config);
 		}
 		else if (mode == "search")
 		{
@@ -367,17 +366,15 @@ int main()
 			read_key<double>("search_threshold", &threshold, config["options"]);
 			read_key<double>("search_fwhm", &fwhm, config["options"]);
 
-			// Prepare kernel
-			if (conv_type == "gaussian")
-			{
-			}
-
 			// Prepare mask
 			load_mask(profile, config);
 
 			if (ddtype == "incoherent")
 			{
-				id = profile.dedisperse_incoherent_search(hdr->dm, nchann, bl_window, threshold);
+				id = profile.dedisperse_incoherent_search(
+						hdr->dm, nchann, 
+						bl_window, threshold,
+						conv_type, fwhm);
 			}
 			else if (ddtype == "coherent")
 			{
@@ -404,7 +401,6 @@ int main()
 
 
 	}
-
 
 	return 0;
 }

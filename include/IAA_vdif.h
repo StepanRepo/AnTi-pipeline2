@@ -138,3 +138,4 @@ public:
 };
 
 #endif // IAA_VDIF_H
+

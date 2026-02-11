@@ -5,8 +5,6 @@
 #include "BaseHeader.h"
 #include <string>
 #include <fstream>
-#include <vector>
-#include <complex>
 #include <fftw3.h>      // For FFTW library types (fftw_complex, fftw_plan)
 
 class BaseReader 
@@ -20,14 +18,21 @@ class BaseReader
 		size_t buf_size;                // Total allocated size of the main buffer (in samples)
 										//
 		std::streamoff data_start_pos;	// Position in the file where reader should start to read data (either beginning of the data section or is set by skip(t0)) 
+										// Not used in PSRFITS!
 
 
 		// FFT members for processing
-		fftw_complex *fft_arr = nullptr;          // FFTW output array for complex FFT results
-		fftw_plan p{};                    // FFTW plan for performing the real-to-complex FFT
+		//fftw_complex *fft_arr = nullptr;          // FFTW output array for complex FFT results
+		//fftw_plan p{};                    // FFTW plan for performing the real-to-complex FFT
 										
 		// Pure virtual methods — must be implemented by derived classes
 		virtual bool fill_buffer() = 0;
+
+
+		size_t fill_2d_baseband_re(double *dyn_spec, size_t time_steps, size_t freq_num);
+		size_t fill_2d_baseband_cmplx(double *dyn_spec, size_t time_steps, size_t freq_num);
+		size_t fill_2d_spectrum(double *dyn_spec, size_t time_steps, size_t freq_num);
+		
 
 	public:
 
@@ -40,9 +45,18 @@ class BaseReader
 		// Pointer to a polymorphic header object
 		BaseHeader* header_ptr = nullptr;
 
-		size_t fill_1d(fftw_complex* vec, size_t n);
-		size_t fill_1d(double* vec, size_t n);
 
+		//Default constructor
+		BaseReader() = default;
+		// Virtual destructor
+		BaseReader(const BaseReader&) = delete;
+		BaseReader& operator=(const BaseReader&) = delete;
+		virtual ~BaseReader();
+
+
+
+
+		size_t fill_1d(double* vec, size_t n);
 		size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num);
 
 	
@@ -50,9 +64,6 @@ class BaseReader
 		// the beginning. Has a default realisation and 
 		// may be overwritten	
 		virtual void reset();
-
-		// Virtual destructor
-		virtual ~BaseReader() = default;
 
 		// Pure virtual methods — must be implemented by derived classes
 		virtual double point2time(size_t point) = 0;
@@ -64,3 +75,4 @@ class BaseReader
 };
 
 #endif // BASE_READER_H
+

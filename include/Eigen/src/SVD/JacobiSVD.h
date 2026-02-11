@@ -571,11 +571,6 @@ class JacobiSVD : public SVDBase<JacobiSVD<MatrixType_, Options_> > {
     compute_impl(matrix, internal::get_computation_options(Options));
   }
 
-  template <typename Derived>
-  explicit JacobiSVD(const TriangularBase<Derived>& matrix) {
-    compute_impl(matrix, internal::get_computation_options(Options));
-  }
-
   /** \brief Constructor performing the decomposition of given matrix using specified options
    *         for computing unitaries.
    *
@@ -603,11 +598,6 @@ class JacobiSVD : public SVDBase<JacobiSVD<MatrixType_, Options_> > {
    */
   template <typename Derived>
   JacobiSVD& compute(const MatrixBase<Derived>& matrix) {
-    return compute_impl(matrix, m_computationOptions);
-  }
-
-  template <typename Derived>
-  JacobiSVD& compute(const TriangularBase<Derived>& matrix) {
     return compute_impl(matrix, m_computationOptions);
   }
 
@@ -649,8 +639,6 @@ class JacobiSVD : public SVDBase<JacobiSVD<MatrixType_, Options_> > {
 
  private:
   template <typename Derived>
-  JacobiSVD& compute_impl(const TriangularBase<Derived>& matrix, unsigned int computationOptions);
-  template <typename Derived>
   JacobiSVD& compute_impl(const MatrixBase<Derived>& matrix, unsigned int computationOptions);
 
  protected:
@@ -690,13 +678,6 @@ class JacobiSVD : public SVDBase<JacobiSVD<MatrixType_, Options_> > {
 
 template <typename MatrixType, int Options>
 template <typename Derived>
-JacobiSVD<MatrixType, Options>& JacobiSVD<MatrixType, Options>::compute_impl(const TriangularBase<Derived>& matrix,
-                                                                             unsigned int computationOptions) {
-  return compute_impl(matrix.toDenseMatrix(), computationOptions);
-}
-
-template <typename MatrixType, int Options>
-template <typename Derived>
 JacobiSVD<MatrixType, Options>& JacobiSVD<MatrixType, Options>::compute_impl(const MatrixBase<Derived>& matrix,
                                                                              unsigned int computationOptions) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(Derived, MatrixType);
@@ -720,7 +701,6 @@ JacobiSVD<MatrixType, Options>& JacobiSVD<MatrixType, Options>::compute_impl(con
     m_isInitialized = true;
     m_info = InvalidInput;
     m_nonzeroSingularValues = 0;
-    m_singularValues.setZero();
     return *this;
   }
   if (numext::is_exactly_zero(scale)) scale = RealScalar(1);

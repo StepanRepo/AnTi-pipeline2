@@ -1,11 +1,12 @@
 #include "aux_math.h"
+#include "fftw3.h"
 #include <Eigen/Core>
+#include <cstddef>
 #include <unsupported/Eigen/CXX11/Tensor>
 #include <cmath> // for sqrt, abs
-#include <iostream>
-#include <deque>
+#include <cstdint>
 
-#include <fstream>
+#include <iostream>
 
 namespace math 
 {
@@ -319,7 +320,7 @@ namespace math
 		auto quantize = [&](double x) -> uint8_t {
 			int bin = static_cast<int>((x - min_val) * scale);
 			if (bin < 0) bin = 0;
-			else if (bin >= NBINS) bin = NBINS - 1;
+			else if (uint32_t(bin) >= NBINS) bin = NBINS - 1;
 			return static_cast<uint8_t>(bin);
 		};
 
@@ -416,7 +417,7 @@ namespace math
 			double a = std::abs(x);
 			int bin = static_cast<int>(a * scale);
 			if (bin < 0) bin = 0;
-			else if (bin >= NBINS) bin = NBINS - 1;
+			else if (uint32_t(bin) >= NBINS) bin = NBINS - 1;
 			return static_cast<uint8_t>(bin);
 		};
 
@@ -527,6 +528,63 @@ namespace math
 		delete[] window;
 	}
 
+	// define vars that will be used multiple times
+	thread_local static fftw_complex* X = nullptr;
+	thread_local static fftw_complex* Y = nullptr;
+	thread_local static fftw_plan fft, ifft = nullptr;
+	thread_local static size_t size = 0;
+	void ccf(double* x, double *y, size_t n1, size_t n2, double *res)
+	{
+		// define temporal vars
+		double *X_re = (double*) X;
+		double *Y_re = (double*) Y;
+		size_t curr_size = 1L << size_t(log2(n1+n2-1) + 1);
+
+
+		// allocate internal arrays for performing FFTs
+		if (size < curr_size)
+		{
+			size = curr_size;
+
+			if (X) fftw_free(X);
+			if (Y) fftw_free(Y);
+			if (fft) fftw_destroy_plan(fft);
+			if (ifft) fftw_destroy_plan(ifft);
+
+			X = (fftw_complex*) fftw_malloc((size/2 + 1) * sizeof(fftw_complex));
+			Y = (fftw_complex*) fftw_malloc((size/2 + 1) * sizeof(fftw_complex));
+
+			X_re = (double*) X;
+			Y_re = (double*) Y;
+
+			fft = fftw_plan_dft_r2c_1d(size, X_re, X, FFTW_ESTIMATE);
+			ifft = fftw_plan_dft_c2r_1d(size, X, X_re, FFTW_ESTIMATE);
+		}
+
+
+		// copy input arrays and pad them with zeros
+		vec_copy(X_re, x, n1);
+		vec_copy(Y_re, y, n2);
+
+		std::fill(X_re + n1, X_re + size, 0.0);
+		std::fill(Y_re + n2, Y_re + size, 0.0);
+
+		fftw_execute_dft_r2c(fft, X_re, X);
+		fftw_execute_dft_r2c(fft, Y_re, Y);
+
+		// conjugate Y
+		for (size_t i = 0; i < size/2 + 1; ++i)
+			Y[i][1] = -Y[i][1];
+		
+
+		vec_prod(X, Y, size/2 + 1);
+		fftw_execute(ifft);
+		vec_prod(X_re, 1.0/double(size), size);
+
+		vec_copy(res, X_re + (size - n2+1), n2-1);
+		vec_copy(res+n2-1, X_re , n1);
+	}
+
 
 	// ------------------------------------------------------------
 	// 3. FITS Layout Conversion 
@@ -602,5 +660,34 @@ namespace math
 	template void layout_c_to_f<int16_t>(int16_t*, const std::vector<size_t>&);
 	template void layout_c_to_f<char>(char*, const std::vector<size_t>&);
 	template void layout_c_to_f<unsigned char>(unsigned char*, const std::vector<size_t>&);
+
+
+	// Clenup function for static variables
+	void cleanup()
+	{
+		if(X) 
+		{
+			fftw_free(X);
+			X = nullptr;
+		}
+
+		if(Y) 
+		{
+			fftw_free(Y);
+			Y = nullptr;
+		}
+
+		if(fft)
+		{
+			fftw_destroy_plan(fft);
+			fft = nullptr;
+		}
+
+		if(ifft)
+		{
+			fftw_destroy_plan(ifft);
+			ifft = nullptr;
+		}
+	}
 
 } // namespace math

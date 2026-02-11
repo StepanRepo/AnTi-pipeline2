@@ -1,15 +1,16 @@
 #include "PSRFITS.h" // Include the header file defining the class interface and base classes
-#include "aux_math.h"
+#include "fitsio.h"
 
-#include <stdexcept>  // For std::runtime_error, std::invalid_argument, std::bad_alloc
+
+#include <vector>
+#include <cstddef>
+#include <cstdio>
 #include <iostream>   // For std::cerr, std::endl
-#include <iomanip>    // For std::setprecision
 #include <cstring>    // For std::memcpy, std::memmove, std::strlcpy
-#include <limits>     // For std::numeric_limits (if needed for validation)
-#include <algorithm>  // For std::min, std::fill_n, std::remove_if
 #include <cctype>     // For std::isspace
 #include <fftw3.h>    // For FFTW library types (fftw_complex, fftw_plan)
 #include <filesystem> // For std::filesystem::path.stem()
+#include <stdexcept>
 
 void PSRFITS::check_status(std::string operation)
 {
@@ -28,6 +29,22 @@ void read_key_bin(fitsfile *fptr, int datatype, std::string key, long firstrow, 
 
 	fits_get_colnum(fptr, CASEINSEN, const_cast<char*>(key.c_str()), &colum, status);
 	fits_read_col(fptr, datatype, colum, firstrow, firstelem, nelements, nulval, array, anynull, status);
+}
+
+template<typename T>
+void read_key(fitsfile *fptr, int datatype, std::string key, T *array, int* status)
+{
+
+	if (datatype == TINT)
+	{
+		int a;
+		fits_read_key(fptr, datatype, const_cast<char*>(key.c_str()), &a, NULL, status);
+		array[0] = static_cast<T>(a);
+	}
+	else
+	{
+		fits_read_key(fptr, datatype, const_cast<char*>(key.c_str()), array, NULL, status);
+	}
 }
 
 void read_data(
@@ -104,22 +121,22 @@ void PSRFITSHeader::fill(fitsfile *fptr, int *status)
 	fits_read_key_str(fptr, "OBS_MODE", str, NULL, status);
 	MODE = std::string(str);
 
-	fits_read_key(fptr, TINT, "NRCVR", &npol, NULL, status);
-	fits_read_key(fptr, TINT, "OBSNCHAN", &nchann, NULL, status);
+	read_key<size_t>(fptr, TINT, "NRCVR", &npol, status);
+	read_key<size_t>(fptr, TINT, "OBSNCHAN", &nchann, status);
 
 	double fcenter, bw;
-	fits_read_key(fptr, TDOUBLE, "OBSFREQ", &fcenter, NULL, status);
-	fits_read_key(fptr, TDOUBLE, "OBSBW", &bw, NULL, status);
-	fits_read_key(fptr, TDOUBLE, "CHAN_DM", &dm, NULL, status);
+	read_key<double>(fptr, TDOUBLE, "OBSFREQ", &fcenter, status);
+	read_key<double>(fptr, TDOUBLE, "OBSBW", &bw, status);
+	read_key<double>(fptr, TDOUBLE, "CHAN_DM", &dm, status);
 
 	fmax = fcenter + bw/2.0;
 	fmin = fcenter - bw/2.0;
 
 	int imjd;
 	double smjd, offs;
-	fits_read_key(fptr, TINT, "STT_IMJD", &imjd, NULL, status);
-	fits_read_key(fptr, TDOUBLE, "STT_SMJD", &smjd, NULL, status);
-	fits_read_key(fptr, TDOUBLE, "STT_OFFS", &offs, NULL, status);
+	read_key<int>(fptr, TINT, "STT_IMJD", &imjd, status);
+	read_key<double>(fptr, TDOUBLE, "STT_SMJD", &smjd, status);
+	read_key<double>(fptr, TDOUBLE, "STT_OFFS", &offs, status);
 
 	t0 = (long double) imjd + (long double)(smjd + offs)/86400.0L;
 
@@ -144,19 +161,19 @@ void PSRFITSHeader::fill(fitsfile *fptr, int *status)
 	read_key_bin(fptr, TDOUBLE, "REF_FREQ", 1, 1, 1, NULL, &fcomp, &anynull, status);
 
 
+
+	
 	char char_subint[] = "SUBINT";
 	fits_movnam_hdu(fptr, BINARY_TBL, char_subint, 0, status);
 
 
 
-
-
 	if (MODE == "SEARCH")
 	{
-		fits_read_key(fptr, TINT, "NSTOT", &OBS_SIZE, NULL, status);
-		fits_read_key(fptr, TINT, "CMPLX", &cmplx, NULL, status);
-		fits_read_key(fptr, TINT, "NSBLK", &nsblk, NULL, status);
-		fits_read_key(fptr, TINT, "NBITS", &nbits, NULL, status);
+		read_key<size_t>(fptr, TINT, "NSTOT", &OBS_SIZE, status);
+		read_key<bool>(fptr, TINT, "CMPLX", &cmplx, status);
+		read_key<size_t>(fptr, TINT, "NSBLK", &nsblk, status);
+		read_key<size_t>(fptr, TINT, "NBITS", &nbits, status);
 
 		obs_window = nsblk*nbits/8;
 	}
@@ -166,18 +183,31 @@ void PSRFITSHeader::fill(fitsfile *fptr, int *status)
 		nbits = 16;
 	}
 
-	fits_read_key(fptr, TINT, "SIGNINT", &sign, NULL, status);
 
-	// timing information about every subint
+	read_key<int>(fptr, TINT, "SIGNINT", &sign, status);
+
+	// Time since the observation start at
+	// the centre of each sub-integration (or row). 
 	t_subint = new double[nsubint];
+	freqs = new double[nchann];
+	
 
-	for (size_t i = 0; i < nsubint; ++i)
-		read_key_bin(fptr, TDOUBLE, "OFFS_SUB", 1, 1, 1, NULL, t_subint + i, &anynull, status);
+	for (int i = 0; i < (int) nsubint; ++i)
+		read_key_bin(fptr, TDOUBLE, "OFFS_SUB", i+1, 1, 1, NULL, t_subint + i, &anynull, status);
+
+	// fill in frequency information
+	read_key_bin(
+			fptr, TDOUBLE, "DAT_FREQ", 
+			1, 1, nchann, 
+			NULL, freqs, &anynull, status);
+
+	fmin = freqs[0];
+	fmax = freqs[nchann - 1];
 
 	tau *= 1e3;
 	dds_mtd[32] = '\0';
 }
-
+/*
 void PSRFITSHeader::print() const
 { // TDIM# = (*,*,*) / (NBIN,NCHAN,NPOL) or (NCHAN,NPOL,NSBLK*NBITS/8)
 
@@ -190,7 +220,9 @@ void PSRFITSHeader::print() const
 	std::cout << "nbin     " << nsubint << "*" << obs_window << std::endl;
 	std::cout << "nchann   " << nchann << std::endl;
 	std::cout << "npol     " << npol << std::endl;
+
 }
+*/
 
 PSRFITS::PSRFITS(const std::string& filename_in, size_t buffer_size): 
 	BaseReader(), header{}
@@ -214,6 +246,8 @@ PSRFITS::PSRFITS(const std::string& filename_in, size_t buffer_size):
 	header.fill(fptr, &status);
 	check_status("Reading file header");
 
+
+
 	if (header.MODE == "PSR")
 		buf_size = buffer_size / (sizeof(double) + sizeof(int16_t));
 	else if (header.MODE == "SEARCH")
@@ -231,20 +265,31 @@ PSRFITS::PSRFITS(const std::string& filename_in, size_t buffer_size):
         buf_max = 0;
 		subint_index = 1;
 		subint_pos = 1;
+
+		start_subint_pos = 1;
+		start_subint_index = 1;
     } 
 	catch (const std::bad_alloc& e) 
 	{
         std::cerr << "Allocation failed for main buffers: " << e.what() << std::endl;
         // Clean up partially allocated memory if one allocation succeeds and the other fails
-		delete[] raw_data;
-		raw_data = nullptr;
+		if (raw_data)
+		{
+			delete[] raw_data;
+			raw_data = nullptr;
+		}
 
-		delete[] buffer;
-		buffer = nullptr;
+		if (buffer)
+		{
+			delete[] buffer;
+			buffer = nullptr;
+		}
         throw; // Re-throw to signal failure
     }
 
-    fft_arr = nullptr;
+	if (header_ptr->npol > 1)
+		throw std::invalid_argument("This progran can not process multy-polarized data yet");
+
 
 	// Set the file to the data
 	char char_subint[] = "SUBINT";
@@ -281,10 +326,10 @@ bool PSRFITS::fill_buffer()
 	size_t nchann = header.nchann;
 	size_t c = header.cmplx ? 2 : 1;
 	size_t nbits = header.nbits;
-	int anynull;
 
 	size_t sample_size = npol*nchann*c;
 	int KIND = (header.MODE == "SEARCH") ? TBYTE : TSHORT;
+
 
 	// Shift remaining data (from a previous incomplete 
 	// processing chunk) to the front of the buffer
@@ -352,6 +397,7 @@ bool PSRFITS::fill_buffer()
 	space_avail = buf_size - buf_max;
 
 	size_t to_add = std::min(header.OBS_SIZE*sample_size - data_read_so_far, space_avail);
+	to_add = std::min(to_add, header.CUT_SIZE*sample_size - data_read_so_far);
 	to_add /= sample_size;
 
 
@@ -371,16 +417,71 @@ bool PSRFITS::fill_buffer()
 
 	check_status("Filling Buffer");
 
-	std::ofstream test("data/test.bin");
-	test.write((char*) buffer, sizeof(double)*buf_max);
-	test.close();
+	return true;
+}
+
+double PSRFITS::point2time(size_t point) 
+{
+	// Number of subint containing the point
+	// The time of its middle point
+	size_t si = point / header.obs_window;
+	double ti = header.t_subint[si];
+
+	// Number of the point iside the subint
+	long sp = (point % header.obs_window);
+
+	return ti + header.tau*sp*1.0e-3;
+}
+
+
+void PSRFITS::skip(double sec) 
+{
+	size_t steps = sec / (header.tau * 1.0e-3);
+
+	start_subint_index = steps / header.obs_window + 1;
+	start_subint_pos = steps % header.obs_window + 1;
+
+	header.t0 += (long double) (steps * (header.tau * 1.0e-3)) / 86400.0L;
+
+	reset();
+}
+
+
+void PSRFITS::set_limit(double t) 
+{
+	header.CUT_SIZE = size_t (t * 1.0e3 / header.tau);
+} 
+
+
+
+void PSRFITS::reset() 
+{
+	buf_max = 0;
+	buf_pos = 0;
+	
+	subint_pos = start_subint_pos;
+	subint_index = start_subint_index;
+}
+
+bool PSRFITS::allow_1d() 
+{
+	if (header.nchann > 1)
+		return false;
+	else if (header.nchann == 1 && header.MODE == "SEARCH")
+		return true;
 
 	return false;
 }
 
-double PSRFITS::point2time(size_t point) {return 0.0;}
-void PSRFITS::skip(double sec) {}
-void PSRFITS::set_limit(double t) {} 
-void PSRFITS::reset() {} 
-bool PSRFITS::allow_1d() {return true;}
-bool PSRFITS::allow_2d() {return true;}
+
+bool PSRFITS::allow_2d() 
+{
+	if (header.nchann > 1)
+		return true;
+
+	if (header.nchann == 1 && header.MODE == "SEARCH")
+		return true;
+
+	return false;
+	
+}

@@ -84,6 +84,7 @@ struct packet_traits<float> : default_packet_traits {
     HasIGammac = 1,
     HasBetaInc = 1,
 
+    HasBlend = 0,
     HasFloor = 1,
     HasCmp = EIGEN_HAS_GPU_DEVICE_FUNCTIONS
   };
@@ -116,6 +117,7 @@ struct packet_traits<double> : default_packet_traits {
     HasGammaSampleDerAlpha = 1,
     HasIGammac = 1,
     HasBetaInc = 1,
+    HasBlend = 0,
   };
 };
 

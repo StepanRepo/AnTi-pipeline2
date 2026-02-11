@@ -1004,7 +1004,8 @@ struct madd_impl {
   }
 };
 
-#if EIGEN_SCALAR_MADD_USE_FMA
+// Use FMA if there is a single CPU instruction.
+#ifdef EIGEN_VECTORIZE_FMA
 template <typename Scalar>
 struct madd_impl<Scalar, std::enable_if_t<has_fma<Scalar>::value>> {
   static EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE Scalar run(const Scalar& x, const Scalar& y, const Scalar& z) {
@@ -1357,12 +1358,6 @@ EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE constexpr T round_down(T a, U b) {
   return ub * (ua / ub);
 }
 
-template <typename T>
-EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE T log2(T x) {
-  EIGEN_USING_STD(log2);
-  return log2(x);
-}
-
 /** Log base 2 for 32 bits positive integers.
  * Conveniently returns 0 for x==0. */
 constexpr int log2(int x) {
@@ -1442,9 +1437,9 @@ EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE double log(const double& x) {
 #endif
 
 template <typename T>
-EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE
-    std::enable_if_t<NumTraits<T>::IsSigned || NumTraits<T>::IsComplex, typename NumTraits<T>::Real>
-    abs(const T& x) {
+EIGEN_DEVICE_FUNC
+EIGEN_ALWAYS_INLINE std::enable_if_t<NumTraits<T>::IsSigned || NumTraits<T>::IsComplex, typename NumTraits<T>::Real>
+abs(const T& x) {
   EIGEN_USING_STD(abs);
   return abs(x);
 }
@@ -1932,6 +1927,7 @@ EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE Scalar arithmetic_shift_right(const Scalar
   return bit_cast<Scalar, SignedScalar>(bit_cast<SignedScalar, Scalar>(a) >> n);
 }
 
+// Otherwise, rely on template implementation.
 template <typename Scalar>
 EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE Scalar fma(const Scalar& x, const Scalar& y, const Scalar& z) {
   return internal::fma_impl<Scalar>::run(x, y, z);
