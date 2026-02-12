@@ -64,20 +64,24 @@ void Profile::matched_filter(double* data, size_t N, double threshold, std::vect
 	power.resize(counter);
 }
 
-std::string Profile::csv_result (size_t left, size_t right, double power, size_t n_found) const
+std::string Profile::csv_result (size_t left, size_t right, double power, size_t id) const
 {
 	std::ostringstream row("");
 	row << std::fixed << std::setprecision(14); // f5.14 (down to ns in MJD)  
 
-	double mjd_left  = hdr->t0 + reader->point2time(left)/86400.0;
-	double mjd_right = hdr->t0 + reader->point2time(right)/86400.0;
-	double width = reader->point2time(right) - reader->point2time(left);
+	long double mjd  = hdr->t0 + reader->point2time(left)/86400.0L;
+	double sec = double(right+left)/2.0 * hdr->tau*1e-3;
+	double width = double(right-left) * hdr->tau*1e-3;
 
 
 	row << reader -> filename  << "; ";
-	row << n_found << "; ";
-	row << mjd_left << "; ";
-	row << mjd_right << "; ";
+	row << id << "; ";
+
+	row << std::fixed << std::setprecision(16); 
+	row << mjd << "; ";
+
+	row << std::fixed << std::setprecision(6); 
+	row << sec << "; ";
 
 	row << std::fixed << std::setprecision(9); // f.9 
 	row << width << "; ";
@@ -185,8 +189,7 @@ std::string Profile::dedisperse_coherent_search(
 	std::ofstream csv(output_dir + id);
 
 	// write table header
-	csv << "# ===== Search Results =====" << std::endl;
-	csv << "# file; num; left; right; width; power;" << std::endl;
+	csv << "file; num; MJD; sec; width; power;" << std::endl;
 	size_t empty_size =  csv.tellp();
 
 	buf_pos = 0;
@@ -279,7 +282,7 @@ std::string Profile::dedisperse_coherent_search(
 
 		// Save info of the search
 		for(size_t i = 0; i < power_dm1.size(); ++i)
-			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], n_found) << '\n';
+			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], i) << '\n';
 
 
 		if (save_raw && is_pulse) 
@@ -329,13 +332,22 @@ std::string Profile::dedisperse_coherent_search(
 
 
 
-		std::cout << "\x1b[2K\r" ;
-		std::cout << "t = " << reader->point2time(sumidx) << " s";
-		std::cout << std::flush;
+		if (verbose > 0)
+		{
+			std::cout << "\x1b[2K\r" ;
+			std::cout << "t = " << reader->point2time(sumidx) << " s";
+			std::cout << std::flush;
+		}
 
 	}
-	std::cout << std::endl;
-	std::cout << "Found " << n_found << " windows" << std::endl;
+
+	if (verbose > 0)
+	{
+		std::cout << std::endl;
+		std::cout << "Found " << n_found << " windows" << std::endl;
+	}
+
+
 	hdr->t0 = t0;
 
 	if (ker_f)
@@ -400,7 +412,9 @@ std::string Profile::dedisperse_incoherent_search(
 	n_DM += n_DM % 2;
 
 	// set 256 MiB buffer as standard size
-	obs_window = std::max(n_DM, (256ul << 20)/nchann/sizeof(double)); 
+	obs_window = std::max(n_DM, (256ul << 20)/nchann/hdr->npol/sizeof(double)); 
+	obs_window = std::min(obs_window, hdr->OBS_SIZE);
+
 	obs_window += n_DM;
 
 	ker_len = size_t((5.0e3*fwhm)/tau) + 1;
@@ -436,8 +450,7 @@ std::string Profile::dedisperse_incoherent_search(
 	std::ofstream csv(output_dir + id);
 
 	// write table header
-	csv << "# ===== Search Results =====" << std::endl;
-	csv << "# file; num; left; right; width; power;" << std::endl;
+	csv << "file; num; MJD; sec; width; power;" << std::endl;
 	size_t empty_size =  csv.tellp();
 
 	buf_pos = 0;
@@ -452,6 +465,7 @@ std::string Profile::dedisperse_incoherent_search(
 	size_t n_found = 0;
 
 	BL_window = size_t(BL_window_s/hdr->tau * 1.0e3);
+	size_t zeroth_lag = (ker_len - 1) / 2;
 
 	while(!eof)
 	{
@@ -476,26 +490,31 @@ std::string Profile::dedisperse_incoherent_search(
 
 
 		if(conv_type == "gaussian")
-			math::ccf(sum, ker_t, obs_window, ker_len, conv);
+			math::ccf(sum, ker_t, N, ker_len, conv);
 		else
 			throw;
 
 
 
 		// Find pulses with overlapping windows
-		math::subtract_baseline(conv + ker_len, N, BL_window);
-		math::normalize_std(conv + ker_len, N, BL_window);
-		matched_filter(conv + ker_len, N, threshold, pulses_dm1, power_dm1);
+		math::subtract_baseline(conv + zeroth_lag, N, BL_window);
+		math::normalize_std(conv + zeroth_lag, N, BL_window);
+		matched_filter(conv + zeroth_lag, N, threshold, pulses_dm1, power_dm1);
 		
 
 
+		
 		/*
 		// Debug output
 		if (n_found == 0)
 		{
 
+			std::ofstream test2(output_dir + "ker.bin");
+			test2.write((char*) (ker_t), ker_len*sizeof(double));
+			test2.close();
+
 			std::ofstream test0(output_dir + "conv.bin");
-			test0.write((char*) (conv + ker_len), N*sizeof(double));
+			test0.write((char*) (conv + zeroth_lag), N*sizeof(double));
 			test0.close();
 
 			std::ofstream test1(output_dir + "sum.bin");
@@ -503,6 +522,7 @@ std::string Profile::dedisperse_incoherent_search(
 			test1.close();
 		}
 		*/
+		
 
 		// Save profiles of the search
 		is_pulse = pulses_dm1.size() > 0;
@@ -515,9 +535,10 @@ std::string Profile::dedisperse_incoherent_search(
 
 		// Save info of the search
 		for(size_t i = 0; i < power_dm1.size(); ++i)
-			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], n_found) << '\n';
+			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], i) << '\n';
 
 
+		/*
 		if (save_raw && is_pulse) 
 		{
 			PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename + "_" + std::to_string(n_found));
@@ -546,7 +567,7 @@ std::string Profile::dedisperse_incoherent_search(
 			PSRFITS_Writer writer0(output_dir + "conv_" + reader->filename + "_" + std::to_string(n_found));
 			writer0.createPrimaryHDU("SEARCH", hdr);
 			writer0.append_subint_search(
-					conv + ker_len, 
+					conv + ker_len-1, 
 					new double((fmin+fmax)/2.0), nullptr,
 					N, 1, 1, 
 					DM, fcomp, tau, "coherent");
@@ -559,19 +580,29 @@ std::string Profile::dedisperse_incoherent_search(
 					N, 1, 1, 
 					DM, fcomp, tau, "coherent");
 		}
+		*/
 
 		buf_pos = buf_max - n_DM;
 		sumidx += N;
 
 
 
-		std::cout << "\x1b[2K\r" ;
-		std::cout << "t = " << reader->point2time(sumidx) << " s";
-		std::cout << std::flush;
+		if (verbose > 0)
+		{
+			std::cout << "\x1b[2K\r" ;
+			std::cout << "t = " << reader->point2time(sumidx) << " s";
+			std::cout << std::flush;
+		}
 
 	}
-	std::cout << std::endl;
-	std::cout << "Found " << n_found << " windows" << std::endl;
+
+	if (verbose > 0)
+	{
+		std::cout << std::endl;
+		std::cout << "Found " << n_found << " windows" << std::endl;
+	}
+
+
 	hdr->t0 = t0;
 
 

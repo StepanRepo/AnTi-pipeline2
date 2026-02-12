@@ -42,7 +42,8 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 	n_DM += n_DM % 2;
 
 	// set 256 MiB buffer as standard size
-	obs_window = std::max(n_DM, (256ul << 20)/nchann/sizeof(double)); 
+	obs_window = std::max(n_DM, (256ul << 20)/nchann/hdr->npol/sizeof(double)); 
+	obs_window = std::min(obs_window, hdr->OBS_SIZE);
 	obs_window += n_DM;
 
 

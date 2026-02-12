@@ -120,15 +120,18 @@ def read_search(hdul):
     if (signint == 1 and header['NBITS'] == 8):
         data = data.astype(np.int8)
 
+
+
+    data = data.reshape(nsubint, nbin, npol, nchan, c)
     dat_scl = dat_scl.reshape(nsubint, npol, nchan, c)
     dat_offs = dat_offs.reshape(nsubint, npol, nchan, c)
     dat_wts = dat_wts.reshape(nsubint, 1, nchan, 1)
-
 
     # Cast DATA to float and apply scale/offset
     # PSRFITS stores data in (bin, chan, pol) order
     real_data = data.astype(np.float32) 
     real_data = (real_data * dat_scl[:, None, :, :] + dat_offs[:, None, :, :]) * dat_wts[:, None, :, :]
+
 
     real_data = real_data.reshape(-1, *real_data.shape[2:])
     real_data = real_data[:nstot, :, :]
@@ -147,12 +150,11 @@ def read_search(hdul):
         real_data = real_data[:, 0, :]       # Shape: (nsubint, nbin, nchan)
 
 
-
     # Use frequency from first subint (assumed constant)
     freq_mhz = dat_freq[0]  # Shape: (nchan,)
-
     time_s = np.arange(real_data.shape[0])*tau
 
+    #plt.ylim(0, 1)
     return real_data, freq_mhz, time_s
 
 
@@ -162,13 +164,12 @@ def read(filename):
         mode = hdul[0].header.get('OBS_MODE', '').strip()
         print(f"Observational mode: {mode}")
 
-        match mode:
-            case "PSR":
-                return read_psr(hdul)
-            case "SEARCH":
-                return read_search(hdul)
-            case _:
-                raise ValueError(f"Unknown OBS_MODE: {mode}")
+        if mode == "PSR":
+            return read_psr(hdul)
+        elif mode == "SEARCH":
+            return read_search(hdul)
+        else:
+            raise ValueError(f"Unknown OBS_MODE: {mode}")
 
 
 
@@ -177,7 +178,7 @@ if __name__ == "__main__":
     path = Path("rup103")
     path = Path("data")
 
-    files = np.sort(list(path.glob("*.fits")))
+    files = np.sort(list(path.glob("*id*.fits")))
 
     for filename in files:
         filename = Path(filename)
@@ -188,7 +189,7 @@ if __name__ == "__main__":
         data_2d = data_2d.T
 
         if(data_2d.shape[0] == 1):
-            binning = 2**9
+            binning = 2**0
         else:
             binning = 2**0
 
@@ -208,7 +209,6 @@ if __name__ == "__main__":
 
             nchan = data_2d.shape[0]
             fr = np.sum(data_2d, axis = 1)
-
 
             fig, ax = plt.subplots(2, 2, 
                                    width_ratios = [2, 1],
@@ -241,14 +241,14 @@ if __name__ == "__main__":
                             aspect = "auto",
                             cmap = "Greys",
                             extent = extent,
-                            vmin = lower * (1 + .2),
-                            vmax = upper * (1 - .2),
+                            #vmin = lower * (1 + .2),
+                            #vmax = upper * (1 - .2),
                             interpolation = "none",
                             )
             ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))
 
 
-            ax[0, 1].set_xscale("log")
+            #ax[0, 1].set_xscale("log")
             ax[0, 1].plot(fr, freqs)
             ax[0, 1].set_ylim(freqs[0].to_value(u.MHz), freqs[-1].to_value(u.MHz))
 

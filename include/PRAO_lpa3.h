@@ -49,6 +49,7 @@ class PRAO_lpa3 : public BaseReader
 	private:
 		// Data buffers
 		float* raw_data = nullptr;
+		long double t0_orig = 0.0L;
 
 		// Local header object (NOT dynamically allocated)
 		LPA3Header header;  // Stack-allocated, not pointer

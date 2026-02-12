@@ -8,6 +8,8 @@
 
 #include <iostream>
 
+#define EIGEN_NO_DEBUG
+
 namespace math 
 {
 
@@ -572,17 +574,13 @@ namespace math
 		fftw_execute_dft_r2c(fft, X_re, X);
 		fftw_execute_dft_r2c(fft, Y_re, Y);
 
-		// conjugate Y
-		for (size_t i = 0; i < size/2 + 1; ++i)
-			Y[i][1] = -Y[i][1];
-		
-
 		vec_prod(X, Y, size/2 + 1);
 		fftw_execute(ifft);
 		vec_prod(X_re, 1.0/double(size), size);
 
-		vec_copy(res, X_re + (size - n2+1), n2-1);
-		vec_copy(res+n2-1, X_re , n1);
+		vec_copy(res, X_re, n1+n2-1);
+		//vec_copy(res, X_re + (size - n2), n2);
+		//vec_copy(res+n2, X_re , n1-1);
 	}
 
 

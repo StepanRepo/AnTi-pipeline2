@@ -1,18 +1,18 @@
 general:
-  mode: "stream"
+  mode: "search"
   input_dir: "data"
   output_dir: "data"
-  parfile: "0531.par"
+  parfile: "0329.par"
   site: "PO"
   verbose: 1
   buf_size: 10
 
-  t0: 147.55
-  t1: 147.65
+  #t0: 147.55
+  t1: 20.0
   
   save_raw: false
-  save_dyn: true
-  save_sum: true
+  save_dyn: false
+  save_sum: false
 
 
 
@@ -23,41 +23,30 @@ options:
   #t2pred: "t2pred.dat"
 
   #nchann: 33554432
-  nchann: 4096
-  #nchann: 512
+  #nchann: 4096
+  nchann: 512
 
-  bl_window: 300.0e-6
+  bl_window: 300.0e-3
   search_threshold: 7.0
-  search_fwhm: 10.0e-6
+  search_fwhm: 20.0e-3
   conv_type: "gaussian"
 
   filter: true
   tail_threshold: .3
-  std_threshold: 30.0
+  std_threshold: 5.0
   #downsample: 4096
   max_len: 100000
 
   
 # Owerwrite files' headers
 advanced:
-  sampling: 1024.0
+  #sampling: 1024.0
   #dm: 26.776
   #fmin: 1772.0
   #fmax: 1260.0
-  fmin: 2675.8
-  fmax: 2163.8
-  dm: 56.7712
+  #fmin: 2675.8
+  #fmax: 2163.8
+  #dm: 56.7712
 
 files:
-  - dyn_rup103_bv_055-0612_ch01.fits
-  #- Crab_pulse/r6326e_bv_326-1702_ch01.vdif_7183.vdif
-  #- rup103_bv_055-0550_ch01.vdif
-  #- rup103_bv_055-0601_ch01.vdif
-  #- rup103_bv_055-0612_ch01.vdif
-  #- rup103_bv_055-0623_ch01.vdif
-  #- rup103_bv_055-0634_ch01.vdif
-  #- rup103_bv_055-0645_ch01.vdif
-  #- rup103_bv_055-0656_ch01.vdif
-  #- rup103_bv_055-0707_ch01.vdif
-  #- rup103_bv_055-0718_ch01.vdif
-  #- rup103_bv_055-0729_ch01.vdif
+  - 010818_0329+54_00adc

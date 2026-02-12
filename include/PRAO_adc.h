@@ -64,6 +64,7 @@ class PRAO_adc : public BaseReader
 		// Handles conversion from int8_t raw data to double.
 		int8_t* raw_data;
 		bool fill_buffer() override;
+		long double t0_orig = 0.0L;
 	public:
 		// Public member to hold the header information (read from the beginning of the file)
 		ADCHeader header;

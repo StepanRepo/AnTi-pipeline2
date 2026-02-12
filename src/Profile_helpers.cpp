@@ -63,11 +63,7 @@ void Profile::shift_window_incoherent(const double* in, double* out, const int* 
 			out[t * nchann + i] = in[(t+shift[i])%obs_window  * nchann + i];
 
 		if (mask)
-		{
-			#pragma omp simd
-			for (size_t i = 0; i < nchann; ++i) 
-				out[t * nchann + i] *= mask[i];
-		}
+			math::vec_prod(out + t*nchann, const_cast<double*>(mask), nchann);
 	}
 }
 

@@ -12,7 +12,7 @@ CXX = g++
 # -g: Include debugging symbols (remove for release build)
 # -fopenmp: Enable to use OpenMP routines
 CXXFLAGS = -std=c++17 -fopenmp -O3 -march=native -ffast-math
-DEBUG = -g -Wall -Wextra #-fopt-info 
+DEBUG = -g -Wall -Wextra #-fsanitize=address -fno-omit-frame-pointer #-fopt-info 
 
 CXXFLAGS += $(DEBUG)
 

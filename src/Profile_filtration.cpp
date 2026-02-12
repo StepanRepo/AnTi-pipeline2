@@ -1,10 +1,13 @@
 #include "Profile.h"
 #include "aux_math.h"
+#include "fftw3.h"
 
 #include <cstddef>
 #include <cmath>
 #include <iostream>
 #include <algorithm>
+#include <memory>
+#include <new>
 #include <numeric>
 
 
@@ -14,7 +17,8 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	if (hdr->nchann != nchann_in && hdr->nchann != 1)
         throw std::runtime_error("The signal was obtained with different number of freq channels");
 
-	std::cout << "Creating mask" << std::endl;
+	if (verbose > 0)
+		std::cout << "Creating mask" << std::endl;
 
 	size_t nchann = 0;
 	if (downsample > 0)
@@ -25,12 +29,10 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	if (nchann > nchann_in) nchann = nchann_in;
 
 
-	// define the mask 
-	fr = new double[nchann];
-	mask = new double[nchann];
-
 	// use 256 MiB buffer for 2d filling
-	size_t obs_window = (256ul << 20)/nchann/sizeof(double);
+	size_t obs_window = (256ul << 20)/nchann/hdr->npol/sizeof(double);
+	obs_window = std::min(obs_window, hdr->OBS_SIZE);
+
 	double *buff = nullptr; 
 	buff = (double*) fftw_malloc(sizeof(double) * nchann * obs_window);
 
@@ -53,7 +55,7 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	mask = new double[nchann];
 	double* M2 = new double[nchann];
 	double* M4 = new double[nchann];
-	double* slice;
+	double* slice = nullptr;
 	double n;
 
 	std::fill(M2, M2 + nchann, 0.0);
@@ -77,8 +79,11 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 			counter += 1;
 			if (counter > max_len && max_len > 0) break;
 
-			std::cout << "\r\033[K"; // move to the beginning of the line and clear the line
-			std::cout << "steps: " << counter << std::flush;
+			if (verbose > 0)
+			{
+				std::cout << "\r\033[K"; // move to the beginning of the line and clear the line
+				std::cout << "steps: " << counter << std::flush;
+			}
 		}
 
 		buf_pos += filled;
@@ -86,8 +91,9 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	}
 	std::cout << std::endl;
 
-	delete [] buff;
+	fftw_free(buff);
 	buff = nullptr;
+	slice = nullptr;
 
 	n = double(counter);
 	math::vec_copy(fr, M2, nchann);
@@ -132,7 +138,7 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	for (size_t i = 0; i < nchann; ++i)
 	{
 		if (fr[i] > tail_reg && std::abs(M4[i]) < kurt_reg)
-			mask[i] = 1.0 / fr[i];
+			mask[i] = 1.0/fr[i];
 		else
 			mask[i] = 0.0;
 	}
@@ -156,15 +162,16 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 		{
 
 			if (fr[i] > tail_reg && res)
-				mask[i] = 1.0 / fr[i];
+				mask[i] = 1.0/fr[i];
 			else
 				mask[i] = 0.0;
 		}
 
 		delete[] res;
 	}
+
 	// ===== Checking section ===== 
-	
+
 	// ===== Downsampling section ===== 
 	//
 	// Create a bigger mask according to the smaller one
@@ -172,43 +179,47 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	// In case leftmost or rightmost channel of smaller mask 
 	// is zero, all according bins in the big mask are zero
 	//
-	double* mask_small = new double[nchann];
-	math::vec_copy(mask_small, mask, nchann);
 
-	delete[] mask;
-	mask = new double[nchann_in];
-
-	size_t s_n = nchann;
-	size_t b_n = nchann_in;
-	size_t start_idx = 0, end_idx = 0, bin_size = 0;
-	for (size_t i = 0; i < s_n - 1; i++) 
+	if (nchann < nchann_in)
 	{
-		double left_val  = mask_small[i];
-		double right_val = mask_small[i + 1];
+		double* mask_small = new double[nchann];
+		math::vec_copy(mask_small, mask, nchann);
 
-		start_idx = static_cast<size_t>(i * (b_n - 1.0) / (s_n - 1.0) + .5);
-		end_idx = static_cast<size_t>((i + 1) * (b_n - 1.0) / (s_n - 1.0) + .5);
-		bin_size = end_idx - start_idx;
+		delete[] mask;
+		mask = new double[nchann_in];
 
-
-		if (left_val == 0.0 || right_val == 0.0) 
+		size_t s_n = nchann;
+		size_t b_n = nchann_in;
+		size_t start_idx = 0, end_idx = 0, bin_size = 0;
+		for (size_t i = 0; i < s_n - 1; i++) 
 		{
-			// Set entire bin to zero
-			std::fill(mask + start_idx, mask + end_idx+1, 0.0);
-		} 
-		else 
-		{
-			// Piecewise linear interpolation
-			for (size_t j = 0; j <= bin_size; j++) 
+			double left_val  = mask_small[i];
+			double right_val = mask_small[i + 1];
+
+			start_idx = static_cast<size_t>(i * (b_n - 1.0) / (s_n - 1.0) + .5);
+			end_idx = static_cast<size_t>((i + 1) * (b_n - 1.0) / (s_n - 1.0) + .5);
+			bin_size = end_idx - start_idx;
+
+
+			if (left_val == 0.0 || right_val == 0.0) 
 			{
-				double t = static_cast<double>(j) / bin_size;
-				mask[start_idx + j] = left_val * (1 - t) + right_val * t;
+				// Set entire bin to zero
+				std::fill(mask + start_idx, mask + end_idx+1, 0.0);
+			} 
+			else 
+			{
+				// Piecewise linear interpolation
+				for (size_t j = 0; j <= bin_size; j++) 
+				{
+					double t = static_cast<double>(j) / bin_size;
+					mask[start_idx + j] = left_val * (1 - t) + right_val * t;
+				}
 			}
 		}
+		std::fill(mask + end_idx, mask + nchann_in, 0.0);
+		delete[] mask_small;
+		mask_small = nullptr;
 	}
-	std::fill(mask + end_idx, mask + nchann_in, 0.0);
-	delete[] mask_small;
-	mask_small = nullptr;
 	// ===== Downsampling section ===== 
 
 
@@ -230,5 +241,7 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
     delete[] M4;
 	// ===== Filtration section ===== 
 
-	std::cout << "Mask created" << std::endl;
+	if (verbose > 0)
+		std::cout << "Mask created" << std::endl;
+
 }

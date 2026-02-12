@@ -10,8 +10,8 @@ class BaseHeader
 {
 	public:
 		// File information
-		size_t OBS_SIZE = 0;		// Number of points in the file
-		size_t CUT_SIZE = SIZE_MAX;		// Number of points before cutoff
+		size_t OBS_SIZE = 0;		// Number of TIME STEPS in the file
+		size_t CUT_SIZE = SIZE_MAX;	// Number of TIME STEPS before cutoff
 		long double t0 = 0.0L;      // Start time in MJD
 		std::string name = "";
 		std::string MODE = "";

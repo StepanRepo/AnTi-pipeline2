@@ -176,8 +176,8 @@ size_t BaseReader::fill_2d_baseband_cmplx(double* dyn_spec, size_t time_steps, s
         for (size_t k = 0; k < freq_num; ++k) 
 		{
             // Access the k+1 element of the FFT output (skip DC component at index 0 often)
-            re = fft_arr[k][0]; // Real part
-            im = fft_arr[k][1]; // Imaginary part
+            re = fft_arr[k+1][0]; // Real part
+            im = fft_arr[k+1][1]; // Imaginary part
             // Store the power (magnitude squared)
             dyn_spec[chunk * freq_num + k] = re*re + im*im;
         }

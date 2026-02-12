@@ -5,6 +5,7 @@
 #include "PSRFITS.h"   // full definition of IAA_vdif
 
 #include "aux_math.h"
+#include "fitsio.h"
 #include "tempo2.h"
 
 
@@ -21,7 +22,9 @@ Profile::Profile(
 		const std::string& format, 
 		size_t buffer_size,
 		bool save_raw_in, bool save_dyn_in, bool save_sum_in,
-		std::string output_dir_in)
+		std::string output_dir_in,
+		int verbose_in
+		)
 {
 
 
@@ -67,6 +70,7 @@ Profile::Profile(
 	redshift = 0.0;
 	sumidx = 0;
 
+	verbose = verbose_in;
 }
 
 Profile::~Profile()
@@ -80,35 +84,33 @@ Profile::~Profile()
 
 	if(raw)
 	{
-		delete raw;
+		delete[] raw;
 		raw = nullptr;
 	}
 
 	if(dyn)
 	{
-		delete dyn;
+		delete[] dyn;
 		dyn = nullptr;
 	}
 
 	if(sum)
 	{
-		delete sum;
+		delete[] sum;
 		sum = nullptr;
 	}
 
 	if(fr)
 	{
-		delete fr;
+		delete[] fr;
 		fr = nullptr;
 	}
 
 	if(mask)
 	{
-		delete mask;
+		delete[] mask;
 		mask = nullptr;
 	}
-
-	math::cleanup();
 
 }
 
@@ -160,6 +162,42 @@ double Profile::get_redshift (std::string par_path, std::string site)
 	return redshift;
 }
 
+void Profile::skip(const double t_in)
+{
+	long double t = 0.0;
+
+	// Consider time to be in MJD if
+	// it exceeds 10hrs 
+	if (t_in > 36000.0L)
+		t = (t_in - hdr->t0) * 86400.0L;
+	else
+		t = t_in;
+
+	t = t < 0.0 ? 0.0 : t;
+	reader->skip(double(t));
+}
+
+void Profile::set_limit(const double t_in)
+{
+	long double t = 0.0;
+
+	// Consider time to be in MJD if
+	// it exceeds 10hrs 
+	if (t_in > 36000.0L)
+		t = (t_in - hdr->t0) * 86400.0L;
+	else
+		t = t_in;
+
+	t = t < 0.0 ? 0.0 : t;
+
+	double DM = hdr->dm;
+	double fmin = hdr->fmin;
+	double fmax = hdr->fmax;
+
+	double t_DM = 4.15e3 * DM * std::abs(1/fmin/fmin - 1/fmax/fmax);
+
+	reader->set_limit(double(t) + t_DM);
+}
 
 
 BaseHeader* Profile::getHeader()

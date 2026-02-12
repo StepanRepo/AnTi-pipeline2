@@ -189,6 +189,7 @@ PRAO_lpa3::PRAO_lpa3(const std::string& filename_in, size_t buffer_size):
 
 
 	header.read_header(file);
+	t0_orig = header.t0;
 	data_start_pos = static_cast<std::streamoff>(file.tellg());
 
     // Find total number of points in the file
@@ -333,13 +334,18 @@ void PRAO_lpa3::skip(double sec)
 			static_cast<std::streamoff>(steps * header.nchann * sizeof(float)), 
 			std::ios::beg);
 
-	header.t0 += steps / (header.tau * 1.0e-3) / 86400.0;
+	t0_orig = header.t0;
+	header.t0 += steps * (header.tau * 1.0e-3) / 86400.0;
 	data_start_pos = file.tellg(); // Update effective start
 }	
 
 void PRAO_lpa3::set_limit(double t)
 {
-	header.CUT_SIZE = size_t (t * 1.0e3 / header.tau);
+	double correction = double(header.t0 - t0_orig)*86400.0;
+	if (correction < 0.0)
+		return;
+
+	header.CUT_SIZE = size_t ((t - correction) * 1.0e3 / header.tau);
 }
 
 double PRAO_lpa3::point2time(size_t point) 

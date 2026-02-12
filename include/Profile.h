@@ -42,6 +42,7 @@ class Profile
 
 		bool save_raw, save_dyn, save_sum;
 		std::string output_dir;
+		int verbose;
 
 		// Construct from filename + format
 		Profile(const std::string& filename, 
@@ -50,17 +51,20 @@ class Profile
 				bool save_raw_in = false, 
 				bool save_dyn_in = false, 
 				bool save_sum_in = false,
-				std::string output_dir = "."
+				std::string output_dir = ".",
+				int verbose = 0
 				);
 
 		// Virtual destructor
 		Profile(const Profile&) = delete;
 		Profile& operator=(const Profile&) = delete;
-		virtual ~Profile();
+		~Profile();
 
 		// Forward fill functions
 		size_t fill_2d(double *dyn_spec, size_t& nchann, size_t& buf_pos, size_t& buf_max, size_t& buf_size);
 		size_t fill_1d(double *vec, size_t& buf_pos, size_t& buf_max, size_t& buf_size);
+		void skip(const double t);
+		void set_limit(const double t);
 
 		void dedisperse_incoherent (double DM, size_t nchann);
 		void dedisperse_coherent (double DM, size_t nchann);

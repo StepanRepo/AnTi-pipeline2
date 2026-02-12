@@ -123,11 +123,6 @@ ADCHeader::ADCHeader():
 	// initializer list above as defaut values
 }
 
-void PRAO_adc::set_limit(double t)
-{
-	header.CUT_SIZE = size_t (t * 1.0e3 / header.tau);
-}
-
 // Implementation of the ADCHeader::decode method.
 void ADCHeader::decode(const char* h_buff) 
 {
@@ -310,6 +305,8 @@ PRAO_adc::PRAO_adc(const std::string& filename_in, size_t buffer_size):
     size_t file_size = static_cast<size_t>(file.tellg());
     header.OBS_SIZE = (file_size - header.numpar * 40) / sizeof(int8_t);
     file.seekg(header.numpar * 40, std::ios::beg); // Seek to the start of data after header
+												   
+	t0_orig = header.t0;
 
     // ADC format are files that are directly
     // written from adc of the antenna
@@ -445,9 +442,20 @@ void PRAO_adc::skip(double sec)
 			static_cast<std::streamoff>(steps * sizeof(int8_t)), 
 			std::ios::beg);
 
+	t0_orig = header.t0;
 	header.t0 += steps / (header.sampling * 1.0e6) / 86400.0;
 	data_start_pos = file.tellg(); // Update effective start
 }	
+
+void PRAO_adc::set_limit(double t)
+{
+	double correction = double(header.t0 - t0_orig)*86400.0;
+	if (correction < 0.0)
+		return;
+
+	header.CUT_SIZE = size_t ((t - correction) * 1.0e3 / header.tau);
+}
+
 
 
 double PRAO_adc::point2time(size_t point) 
