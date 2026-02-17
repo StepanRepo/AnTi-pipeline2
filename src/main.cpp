@@ -150,10 +150,14 @@ void load_mask(Profile& profile, const YAML::Node& config)
 	size_t max_len = 0;
 	bool filter = false;
 
+	read_key<std::string>("mask_file", &mask_file, config["options"], &mask_file);
 	read_key<size_t>("nchann", &nchann, config["options"]);
 	read_key<size_t>("max_len", &max_len, config["options"], &max_len);
 	read_key<size_t>("downsample", &downsample, config["options"], &downsample);
 	read_key<bool>("filter", &filter, config["options"], &filter);
+
+	if (!filter)
+		return;
 
 	if (mask_file == "" && filter)
 	{
@@ -164,6 +168,14 @@ void load_mask(Profile& profile, const YAML::Node& config)
 			profile.create_mask(nchann, std_threshold, tail_threshold, max_len, downsample);
 		else
 			profile.create_mask(nchann, std_threshold, tail_threshold, max_len);
+	}
+	else if (mask_file != "")
+	{
+		Profile wts_prf(mask_file, "PSRFITS", 0);
+		wts_prf.load_mask(nchann);
+
+		profile.mask = new double[nchann];
+		math::vec_copy(profile.mask, wts_prf.mask, nchann);
 	}
 }
 
@@ -298,6 +310,8 @@ void run_stream_mode(
 		double t1,
 		int verbose)
 {
+	if (! (save_raw || save_dyn || save_sum))
+		return;
 	std::cout << "\n=== STREAM MODE ===\n";
 
 	// Parse mode-specific options
@@ -382,6 +396,8 @@ void trim_pulses(
     int verbose
 	)
 {
+	if (! (save_raw || save_dyn || save_sum))
+		return;
     //=========================================================================
     // READ PULSE CATALOG
     //=========================================================================
@@ -515,9 +531,15 @@ void trim_pulses(
             //============================================
             
             // Create a temporary config node for this pulse
-            YAML::Node pulse_config = config;
-            
-            
+            YAML::Node pulse_config = YAML::Clone(config);
+		
+			// If there is no mask file in the configuration	
+			if (! (config["options"]["mask_file"] &&
+						!config["options"]["mask_file"].IsNull()))
+			{
+				pulse_config["options"]["mask_file"] = output_dir + "wts_" + filename + ".fits";
+			}
+
             // Create a temporary config with just this file
             YAML::Node temp_files;
             temp_files.push_back(filename);
@@ -580,11 +602,11 @@ std::string collect_search_results(
 		const double threshold
 		)
 {
-    if (csv_files.empty()) {
+    if (csv_files.empty()) 
+	{
         std::cout << "No CSV files to collect." << std::endl;
         return "";
     }
-
     // Generate output filename with timestamp
     auto now = std::chrono::system_clock::now();
     std::time_t now_time = std::chrono::system_clock::to_time_t(now);
@@ -765,9 +787,15 @@ void run_search_mode(
 			threshold
 			);
 
+
+	if (collection_file == "") return;
+
+	if (! (save_raw || save_dyn || save_sum))
+		return;
+
 	trim_pulses(
 			collection_file,
-			1.0,
+			2.0,
 			config, 
 			input_dir, 
 			output_dir, 

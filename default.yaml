@@ -26,8 +26,8 @@ options:
   #nchann: 4096
   nchann: 512
 
-  bl_window: 300.0e-3
-  search_threshold: 7.0
+  bl_window: 1000.0e-3
+  search_threshold: 5.0
   search_fwhm: 20.0e-3
   conv_type: "gaussian"
 

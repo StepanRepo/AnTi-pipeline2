@@ -1,4 +1,5 @@
 #include "Profile.h"
+#include "PSRFITS_Writer.h"
 #include "aux_math.h"
 #include "fftw3.h"
 
@@ -6,10 +7,25 @@
 #include <cmath>
 #include <iostream>
 #include <algorithm>
-#include <memory>
 #include <new>
 #include <numeric>
+#include <stdexcept>
 
+
+void Profile::load_mask(size_t nchann)
+{
+	mask = new double[nchann];
+
+	try 
+	{
+		reader->fill_wts(mask, nchann);
+	} 
+	catch(std::runtime_error &error)
+	{
+		delete[] mask;
+		throw error;
+	}
+}
 
 void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_threshold, size_t max_len, size_t downsample)
 {
@@ -105,11 +121,7 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	math::vec_scale(M4, (n+1.0) / (n-1.0), nchann);
 	math::vec_sub(M4, 1.0, nchann); // to shift mean towards zero
 
-	/*
-	* std::ofstream test(output_dir + "test.bin");
-	* test.write((char*) M4, sizeof(double)*nchann);
-	* test.close();
-	*/
+	
 	// ===== Kurtosis calculation ===== 
 
 	if (counter == 0)
@@ -137,7 +149,7 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	double tail_reg = tail_threshold * mean_sens;
 	for (size_t i = 0; i < nchann; ++i)
 	{
-		if (fr[i] > tail_reg && std::abs(M4[i]) < kurt_reg)
+		if ((fr[i] > tail_reg) && (std::abs(M4[i]) < kurt_reg))
 			mask[i] = 1.0/fr[i];
 		else
 			mask[i] = 0.0;
@@ -151,17 +163,33 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	// a simpler method: sigmaclip
 	if (std::accumulate(mask, mask+nchann, 0.0) == 0.0)
 	{
+
 		bool *res = new bool[nchann];
 		double mu, sigma;
 
-		math::vec_copy(mask, fr, nchann);
-		math::sigmaclip(mask, res, nchann, sig_threshold, &mu, &sigma);
+		math::sigmaclip(M4, res, nchann, sig_threshold, &mu, &sigma);
+
+		// Find characteristic level of frequency 
+		// response to regect faint tails
+		//mu = math::median(fr, nchann);
+		//tail_reg = tail_threshold * mu;
+
+		mu = 0.0;
+		counter = 0;
+		for (size_t i = 0; i < nchann; ++i)
+		{
+			if (res[i])
+			{
+				mu += fr[i];
+				counter += 1;
+			}
+		}
+		mu = mu / double(counter);
 		tail_reg = tail_threshold * mu;
 
 		for (size_t i = 0; i < nchann; ++i)
 		{
-
-			if (fr[i] > tail_reg && res)
+			if ((fr[i] > tail_reg) && res[i])
 				mask[i] = 1.0/fr[i];
 			else
 				mask[i] = 0.0;
@@ -169,8 +197,14 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 
 		delete[] res;
 	}
-
 	// ===== Checking section ===== 
+
+	
+	std::ofstream test(output_dir + "mask.bin");
+	test.write((char*) mask, sizeof(double)*nchann);
+	test.close();
+	
+
 
 	// ===== Downsampling section ===== 
 	//
@@ -228,11 +262,13 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	// ===== Final section ===== 
 	// Normilize mask according to the PSRFITS standard:
 	// mask \in [0, 1]
-	double max = *std::max_element(mask, mask + nchann_in);
-	double min = *std::min_element(mask, mask + nchann_in);
+	//
+	// Find max and min of non-masked channels
+	double max_val = *std::max_element(mask, mask+nchann);
+	double min_val = *std::min_element(mask, mask+nchann);
 
 	for (size_t i = 0; i < nchann_in; ++i)
-		mask[i] = (mask[i] - min) / (max - min);
+		mask[i] = (mask[i] - min_val) / (max_val - min_val);
 
 	// turn back to the initial position in the file
 	reader->reset();
@@ -240,6 +276,14 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
     delete[] M2;
     delete[] M4;
 	// ===== Filtration section ===== 
+
+	PSRFITS_Writer writer(output_dir + "wts_" + reader->filename);
+	writer.createPrimaryHDU("SEARCH", hdr);
+	writer.append_subint_search(
+			nullptr, 
+			hdr->freqs, mask,
+			1, nchann, 1, 
+			0.0, 0.0, 0.0, "");
 
 	if (verbose > 0)
 		std::cout << "Mask created" << std::endl;

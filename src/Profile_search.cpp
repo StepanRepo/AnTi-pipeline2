@@ -2,6 +2,7 @@
 #include "aux_math.h"
 #include "PSRFITS_Writer.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <iostream>
 #include <iomanip>
@@ -22,12 +23,13 @@ void Profile::matched_filter(double* data, size_t N, double threshold, std::vect
 
 	for (size_t i = 0; i < N-1; ++i)
 		edges[i] = mask[i+1] - mask[i];
-	edges[N-1] = 0.0;
+
+	edges[N-1] = 0;
 
 	for (size_t i = 0; i < N; ++i)
 	{
-		if (edges[i] > 0.0) rises.push_back(i);
-		if (edges[i] < 0.0) falls.push_back(i);
+		if (edges[i] > 0) rises.push_back(i);
+		if (edges[i] < 0) falls.push_back(i);
 	}
 
 	if (rises.size() > falls.size())
@@ -42,10 +44,11 @@ void Profile::matched_filter(double* data, size_t N, double threshold, std::vect
 	size_t a, b;
 	for(size_t i = 0; i < rises.size(); ++i)
 	{
-		a = rises[i];
-		b = falls[i];
+		a = rises[i]+1;
+		b = falls[i]+1;
+
 		//power[i] = math::mean(data + a+1, b-a);
-		power[i] = (b-a > 0) ? *std::max_element(data+a, data+b) : 0.0;
+		power[i] = (b-a > 0) ? *std::max_element(data+a, data+b) : data[a];
 	}
 
 
@@ -480,10 +483,10 @@ std::string Profile::dedisperse_incoherent_search(
 			std::fill(pre + buf_max*nchann, pre + obs_window*nchann, 0.0);
 		}
 
+		N = buf_max - n_DM;
+		if (N == 0) continue;
 
 		shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
-		
-		N = buf_max - n_DM;
 
 		for (size_t t = 0; t < N; ++t) 
 			sum[t] = std::accumulate(post + t*nchann, post + (t+1)*nchann, 0.0);
@@ -495,16 +498,11 @@ std::string Profile::dedisperse_incoherent_search(
 			throw;
 
 
-
 		// Find pulses with overlapping windows
 		math::subtract_baseline(conv + zeroth_lag, N, BL_window);
 		math::normalize_std(conv + zeroth_lag, N, BL_window);
 		matched_filter(conv + zeroth_lag, N, threshold, pulses_dm1, power_dm1);
 		
-
-
-		
-		/*
 		// Debug output
 		if (n_found == 0)
 		{
@@ -521,7 +519,6 @@ std::string Profile::dedisperse_incoherent_search(
 			test1.write((char*) (sum), N*sizeof(double));
 			test1.close();
 		}
-		*/
 		
 
 		// Save profiles of the search

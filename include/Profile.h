@@ -1,6 +1,7 @@
 #ifndef PROFILE_H
 #define PROFILE_H
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -87,6 +88,7 @@ class Profile
 				std::string conv_type = "", 
 				double fwhm = 0.0);
 
+		void load_mask(size_t nchann);
 		void create_mask(size_t nchann, double sig_threshold, double tail_threshold, size_t max_len = 0, size_t downsample = 0);
 
 		void fold_dyn(double P, size_t nchann);

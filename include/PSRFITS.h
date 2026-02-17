@@ -3,6 +3,7 @@
 
 
 
+#include <cstddef>
 extern "C" {
 #include <fitsio.h>
 }
@@ -66,6 +67,7 @@ class PSRFITS : public BaseReader
 		// Destructor: Cleans up allocated memory and closes the file.
 		~PSRFITS() override;
 
+		virtual bool fill_wts(double* mask, size_t nchann) override;
 		virtual double point2time(size_t point) override;
 		virtual void skip(double sec) override;
 		virtual void set_limit(double t) override; 

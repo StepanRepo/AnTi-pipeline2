@@ -485,3 +485,24 @@ bool PSRFITS::allow_2d()
 	return false;
 	
 }
+
+bool PSRFITS::fill_wts(double* mask, size_t nchann) 
+{
+
+	int anynull;
+	std::vector<float> dat_wts(nchann);
+
+	read_key_bin(
+			fptr, TFLOAT, "DAT_WTS", 
+			1, 1, nchann, 
+			NULL, dat_wts.data(), &anynull, &status);
+
+	check_status("Reading mask information");
+	if (status != 0)
+		throw std::runtime_error("Can not load channel weights information");
+
+	for (size_t i = 0; i < nchann; ++i)
+		mask[i] = double(dat_wts[i]);
+
+	return true;
+}

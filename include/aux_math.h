@@ -45,6 +45,7 @@ namespace math
     double var(double *a, size_t n, double ddof = 0.0);
     void sigmaclip(double *a, bool *mask, size_t n, double threshold, double* mu = nullptr, double* sigma = nullptr);
     void kurtosis_2d(double *data, double *result, size_t n, size_t m);
+	double quantile(const double* data, double p, size_t n);
 
     // --- Time-domain profile processing ---
 	void subtract_baseline(double *data, size_t n, size_t window_size);

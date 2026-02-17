@@ -293,3 +293,9 @@ size_t BaseReader::fill_1d(double *vec, size_t n)
 
 	return i;
 }
+
+bool BaseReader::fill_wts(double* mask, size_t freq_num)
+{
+	throw std::runtime_error("This format doesn't support channels' weights storage");
+	return 0;
+}

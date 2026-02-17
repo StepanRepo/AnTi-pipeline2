@@ -172,6 +172,66 @@ def read(filename):
             raise ValueError(f"Unknown OBS_MODE: {mode}")
 
 
+def plot2d(data_2d, freqs, tl):
+    data_2d[data_2d == 0.0] = np.median(data_2d[data_2d > 0])
+
+
+    nchan = data_2d.shape[0]
+    fr = np.sum(data_2d, axis = 1)
+
+    fig, ax = plt.subplots(2, 2, 
+                           width_ratios = [2, 1],
+                           height_ratios = [2, 1],
+                           )
+
+
+    extent = [tl[0].to_value(u.ms), tl[-1].to_value(u.ms), 
+              freqs[0].to_value(u.MHz), freqs[-1].to_value(u.MHz)]
+
+    ax[1, 1].set_visible(False)
+    ax[0, 0].sharex(ax[1, 0]) 
+
+
+
+    sig = 3
+    clipped, lower, upper = sigmaclip(data_2d, sig, sig)
+
+    while len(data_2d[(data_2d > lower) & (data_2d < upper)])/len(data_2d.ravel()) < .5:
+        sig += 1
+        clipped, lower, upper = sigmaclip(data_2d, sig, sig)
+        print(sig, upper, lower)
+
+        if sig > 10:
+            break
+
+    ax[0, 0].imshow(data_2d, 
+                    origin = "lower", 
+                    aspect = "auto",
+                    cmap = "Greys",
+                    extent = extent,
+                    #vmin = lower * (1 + .2),
+                    #vmax = upper * (1 - .2),
+                    interpolation = "none",
+                    )
+    ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))
+
+
+    #ax[0, 1].set_xscale("log")
+    ax[0, 1].plot(fr, freqs)
+    ax[0, 1].set_ylim(freqs[0].to_value(u.MHz), freqs[-1].to_value(u.MHz))
+
+
+    return fig, ax
+
+
+    ax[0, 1].set_yticks([])
+
+    ax[0, 0].set_ylabel("Frequency, MHz")
+    ax[0, 1].set_xlabel("FR Intensity")
+    ax[1, 0].set_xlabel("Time, ms")
+    ax[1, 0].set_ylabel("Integal Intensity")
+
+
 
 if __name__ == "__main__":
     path = Path(".")

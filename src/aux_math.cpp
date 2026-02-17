@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include <iostream>
+#include <fstream>
 
 #define EIGEN_NO_DEBUG
 
@@ -292,6 +293,83 @@ namespace math
 		delete[] slice;
 	}
 
+
+	// P² Algorithm to find approximate value of a given quantile
+	// This algorithm was implemented by Qwen3-Coder AI
+	double quantile(double *data, double p, size_t n) {
+		if (n == 0 || p < 0.0 || p > 1.0) return NAN;
+
+		if (n <= 5) {
+			// For small arrays, sort and return exact quantile
+			double *temp = new double[n];
+
+			for (size_t i = 0; i < n; ++i) temp[i] = data[i];
+			qsort(temp, n, sizeof(double),
+					[](const void *a, const void *b) {
+					double x = *(const double*)a, y = *(const double*)b;
+					return (x > y) - (x < y);
+					});
+			double result = temp[(int)round((n - 1) * p)];
+			delete [] temp;
+			return result;
+		}
+
+		// Initialize markers from first 5 elements
+		double q[5], ns[5], dns[5];
+		int nm[5];
+
+		for (int i = 0; i < 5; ++i) q[i] = data[i];
+		qsort(q, 5, sizeof(double),
+				[](const void *a, const void *b) {
+				double x = *(const double*)a, y = *(const double*)b;
+				return (x > y) - (x < y);
+				});
+
+		for (int i = 0; i < 5; ++i) nm[i] = i;
+		ns[0] = 0; ns[1] = 2*p; ns[2] = 4*p; ns[3] = 2+2*p; ns[4] = 4;
+		dns[0] = 0; dns[1] = p/2; dns[2] = p; dns[3] = (1+p)/2; dns[4] = 1;
+
+		// Process remaining elements
+		for (size_t idx = 5; idx < n; ++idx) {
+			double x = data[idx];
+
+			int k;
+			if (x < q[0]) { q[0] = x; k = 0; }
+			else if (x < q[1]) k = 0;
+			else if (x < q[2]) k = 1;
+			else if (x < q[3]) k = 2;
+			else if (x < q[4]) k = 3;
+			else { q[4] = x; k = 3; }
+
+			for (int i = k + 1; i < 5; ++i) nm[i]++;
+			for (int i = 0; i < 5; ++i) ns[i] += dns[i];
+
+			for (int i = 1; i <= 3; ++i) {
+				double d = ns[i] - nm[i];
+				if ((d >= 1 && nm[i + 1] - nm[i] > 1) ||
+						(d <= -1 && nm[i - 1] - nm[i] < -1)) {
+					int dInt = (d > 0) ? 1 : -1;
+
+					double d1 = nm[i] - nm[i - 1];
+					double d2 = nm[i + 1] - nm[i];
+					double term1 = (d1 + d) * (q[i + 1] - q[i]) / d2;
+					double term2 = (d2 - d) * (q[i] - q[i - 1]) / d1;
+					double qs = q[i] + d / (nm[i + 1] - nm[i - 1]) * (term1 + term2);
+
+					if (q[i - 1] < qs && qs < q[i + 1])
+						q[i] = qs;
+					else
+						q[i] = q[i] + dInt * (q[i + dInt] - q[i]) / (nm[i + dInt] - nm[i]);
+
+					nm[i] += dInt;
+				}
+			}
+		}
+
+		return q[2];
+	}
+
+
 	// ------------------------------------------------------------
 	// 3. Time-domain profile processing
 	// ------------------------------------------------------------
@@ -304,8 +382,20 @@ namespace math
 		const size_t half = k / 2;
 
 		// Step 1: Find global min/max for 8-bit quantization
-		double min_val = *std::min_element(data, data + n);
-		double max_val = *std::max_element(data, data + n);
+		double min_val = quantile(data, .05, n);
+		double max_val = quantile(data, .95, n);
+
+		double mean = (max_val + min_val) / 2.0;
+		double dev = max_val - mean; // about 2 sigmas
+		min_val = mean - 5.0*dev; // make it 10 sigmas
+		max_val = mean + 5.0*dev; // to account for trends
+
+
+
+		//std::cout << "q_0.01: " << min_val << std::endl;
+		//std::cout << "q_0.99: " << max_val << std::endl;
+
+
 		const double eps = 1e-12;
 		if (max_val - min_val < eps) return; // constant data
 
@@ -384,6 +474,12 @@ namespace math
 		for (size_t i = 0; i < n; ++i) {
 			data[i] -= medians[i];
 		}
+
+		/*
+			std::ofstream test0("data/med.bin");
+			test0.write((char*) medians.data(), n*sizeof(double));
+			test0.close();
+			*/
 	}
 
 
@@ -403,11 +499,23 @@ namespace math
 		};
 
 		// Quantize absolute values |data[i]| over full range
-		double max_abs = 0.0;
-		for (size_t i = 0; i < n; ++i) {
-			double a = std::abs(data[i]);
-			if (a > max_abs) max_abs = a;
-		}
+		//double max_abs = 0.0;
+		//for (size_t i = 0; i < n; ++i) {
+		//	double a = std::abs(data[i]);
+		//	if (a > max_abs) max_abs = a;
+		//}
+
+		// Step 1: Find global min/max for 8-bit quantization
+		double min_val = quantile(data, .05, n);
+		double max_val = quantile(data, .95, n);
+
+		double mean = (max_val + min_val) / 2.0;
+		double dev = max_val - mean; // about 2 sigmas
+		min_val = mean - 2.5*dev; // make it 5 sigmas
+		max_val = mean + 2.5*dev; // assuming there is no trend
+		double max_abs = max_val - min_val;
+
+
 		const double eps = 1e-12;
 		if (max_abs < eps) return;
 
