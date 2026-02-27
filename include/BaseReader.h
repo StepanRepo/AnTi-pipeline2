@@ -59,7 +59,9 @@ class BaseReader
 
 		virtual size_t fill_1d(double* vec, size_t n);
 		virtual size_t fill_2d(double *dyn_spec, size_t time_steps, size_t freq_num);
-		virtual bool fill_wts(double* mask, size_t freq_num);
+		virtual bool fill_wts(double* mask, double* fr, size_t freq_num);
+
+		virtual bool check_fit();
 
 	
 		// Reset observational file to

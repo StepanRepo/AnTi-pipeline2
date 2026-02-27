@@ -3,8 +3,12 @@
 #include "PSRFITS_Writer.h"
 
 #include <iostream>
+#include <algorithm>
 
-std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
+std::string Profile::dedisperse_incoherent_stream(
+		double DM, size_t nchann,
+		bool is_save_raw, bool is_save_dyn, bool is_save_sum
+		)
 {
 	check_incoherent(nchann);
 
@@ -23,11 +27,11 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 	id += std::to_string(std::rand());
 	id += ".bin";
 
-	if (save_raw)
+	if (is_save_raw)
 		raw_output = std::ofstream(output_dir + "raw_" + id);
-	if (save_dyn)
+	if (is_save_dyn)
 		dyn_output = std::ofstream(output_dir + "dyn_" + id);
-	if (save_sum)
+	if (is_save_sum)
 		sum_output = std::ofstream(output_dir + "sum_" + id);
 
 
@@ -52,7 +56,7 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 	post = new double[obs_window*nchann];
 	sum = new double[obs_window - n_DM];
 
-	calc_shift_int(shift, DM, fcomp, hdr->freqs, nchann, tau, redshift);
+	calc_shift_int(shift, DM, fcomp, hdr->freqs.data(), nchann, tau, redshift);
 
 	buf_pos = 0;
 	buf_max = 0;
@@ -72,6 +76,18 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 			std::fill(pre + buf_max*nchann, pre + obs_window*nchann, 0.0);
 		}
 
+		if (buf_max < n_DM)
+			continue;
+
+
+		if (fr)
+		{
+			for (size_t i = buf_pos; i < buf_max; ++i)
+			{
+				math::vec_sub(pre + i*nchann, fr, nchann);
+				math::vec_div(pre + i*nchann, fr, nchann);
+			}
+		}
 
 		shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
 
@@ -83,15 +99,15 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 		// regecting last n_DM inputs
 
 
-		if (save_raw)
+		if (is_save_raw)
 			raw_output.write(reinterpret_cast<const char*>(pre),
 					nchann * (buf_max - n_DM) * sizeof(double));
 
-		if (save_dyn)
+		if (is_save_dyn)
 			dyn_output.write(reinterpret_cast<const char*>(post),
 					nchann * (buf_max - n_DM) * sizeof(double));
 
-		if (save_sum)
+		if (is_save_sum)
 			sum_output.write(reinterpret_cast<const char*>(sum),
 					(buf_max - n_DM) * sizeof(double));
 
@@ -100,48 +116,38 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 		std::cout << "t = " << reader->point2time(sumidx) << " ms" << std::endl;
 	}
 
-
-	// Convert save buffers into readable psrfits files
-	if (save_raw)
+	if (sumidx == 0)
 	{
-		raw_output.close();
+		if (is_save_raw)
+		{
+			raw_output.close();
+			std::remove((output_dir + "raw_" + id).c_str());
+		}
 
-		PSRFITS_Writer writer(output_dir + "raw_" + reader->filename);
-		writer.createPrimaryHDU("SEARCH", hdr);
-		writer.append_subint_stream(
-				output_dir + "raw_" + id, 
-				hdr->freqs, mask, 
-				nchann, 1, 
-				DM, fcomp, tau,
-				"");
+		if (is_save_dyn)
+		{
+			dyn_output.close();
+			std::remove((output_dir + "dyn_" + id).c_str());
+		}
+
+		if (is_save_sum)
+		{
+			sum_output.close();
+			std::remove((output_dir + "sum_" + id).c_str());
+		}
+
+		id = "";
 	}
-
-	if (save_dyn)
+	else 
 	{
-		dyn_output.close();
+		if (is_save_raw)
+			raw_output.close();
 
-		PSRFITS_Writer writer(output_dir + "dyn_" + reader->filename);
-		writer.createPrimaryHDU("SEARCH", hdr);
-		writer.append_subint_stream(
-				output_dir + "dyn_" + id, 
-				hdr->freqs, nullptr, 
-				nchann, 1, 
-				DM, fcomp, tau,
-				"incoherent");
-	}
+		if (is_save_dyn)
+			dyn_output.close();
 
-	if (save_sum)
-	{
-		sum_output.close();
-
-		PSRFITS_Writer writer(output_dir + "sum_" + reader->filename);
-		writer.createPrimaryHDU("SEARCH", hdr);
-		writer.append_subint_stream(
-				output_dir + "sum_" + id, 
-				hdr->freqs, nullptr, 
-				1, 1, 
-				DM, fcomp, tau,
-				"incoherent");
+		if (is_save_sum)
+			sum_output.close();
 	}
 
 	delete[] pre;
@@ -156,7 +162,10 @@ std::string Profile::dedisperse_incoherent_stream(double DM, size_t nchann)
 	return id;
 }
 
-std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
+std::string Profile::dedisperse_coherent_stream(
+		double DM, size_t nchann,
+		bool is_save_raw, bool is_save_dyn, bool is_save_sum
+		)
 {
 	check_coherent();
 
@@ -206,7 +215,7 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 
 
 	dphase = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann)));
-	calc_shift_phase(dphase, DM, fcomp, hdr->freqs, nchann, redshift);
+	calc_shift_phase(dphase, DM, fcomp, hdr->freqs.data(), nchann, redshift);
 
 	if (mask)
 		math::vec_prod(dphase, mask, nchann);
@@ -231,13 +240,13 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 	id += std::to_string(std::rand());
 	id += ".bin";
 
-	if (save_raw)
+	if (is_save_raw)
 		raw_output = std::ofstream(output_dir + "raw_" + id);
 
-	if (save_dyn)
+	if (is_save_dyn)
 		dyn_output = std::ofstream(output_dir + "dyn_" + id);
 
-	if (save_sum)
+	if (is_save_sum)
 		sum_output = std::ofstream(output_dir + "sum_" + id);
 
 	std::fill(buff, buff + 2*n_DM, 0.0);
@@ -277,15 +286,15 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 		detect(t_space, sum, nchann);
 
 
-		if (save_raw)
+		if (is_save_raw)
 			raw_output.write(reinterpret_cast<const char*>(buff + buf_pos),
 					(2*N) * sizeof(double));
 
-		if (save_dyn)
+		if (is_save_dyn)
 			dyn_output.write(reinterpret_cast<const char*>(t_space + buf_pos/2),
 					(N) * sizeof(fftw_complex));
 
-		if (save_sum)
+		if (is_save_sum)
 			sum_output.write(reinterpret_cast<const char*>(sum + buf_pos/2),
 					(N) * sizeof(double));
 
@@ -327,44 +336,38 @@ std::string Profile::dedisperse_coherent_stream(double DM, size_t nchann)
 		/* ========== */
 	}
 
-
-	if (save_raw)
+	if (sumidx == 0)
 	{
-		raw_output.close();
+		if (is_save_raw)
+		{
+			raw_output.close();
+			std::remove((output_dir + "raw_" + id).c_str());
+		}
 
-		PSRFITS_Writer writer(output_dir + "raw_" + reader->filename);
-		writer.createPrimaryHDU("SEARCH", hdr);
-		writer.append_subint_stream(
-				output_dir + "raw_" + id, 
-				hdr->freqs, nullptr, 
-				1, 1, 
-				0.0, fcomp, tau, "");
+		if (is_save_dyn)
+		{
+			dyn_output.close();
+			std::remove((output_dir + "dyn_" + id).c_str());
+		}
+
+		if (is_save_sum)
+		{
+			sum_output.close();
+			std::remove((output_dir + "sum_" + id).c_str());
+		}
+
+		id = "";
 	}
-
-	if (save_dyn)
+	else 
 	{
-		dyn_output.close();
+		if (is_save_raw)
+			raw_output.close();
 
-		PSRFITS_Writer writer(output_dir + "dyn_" + reader->filename);
-		writer.createPrimaryHDU("SEARCH", hdr);
-		writer.append_subint_stream(
-				output_dir + "dyn_" + id, 
-				hdr->freqs, nullptr, 
-				1, 1, 
-				DM, fcomp, tau, "coherent", true);
-	}
+		if (is_save_dyn)
+			dyn_output.close();
 
-	if (save_sum)
-	{
-		sum_output.close();
-
-		PSRFITS_Writer writer(output_dir + "sum_" + reader->filename);
-		writer.createPrimaryHDU("SEARCH", hdr);
-		writer.append_subint_stream(
-				output_dir + "sum_" + id, 
-				hdr->freqs, nullptr, 
-				1, 1, 
-				DM, fcomp, tau, "coherent");
+		if (is_save_sum)
+			sum_output.close();
 	}
 
 	fftw_destroy_plan(fft);

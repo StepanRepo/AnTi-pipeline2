@@ -39,6 +39,10 @@ namespace math
 
     void vec_copy  (double* dst, double* src, size_t n);
 
+	double horner (const std::vector<double> &p, double x);
+	double find_root (const std::vector<double> &p, double left, double right);
+
+
     // --- Statistics ---
     double mean(double* a, size_t n);
     double median(double* a, size_t n);
@@ -47,13 +51,39 @@ namespace math
     void kurtosis_2d(double *data, double *result, size_t n, size_t m);
 	double quantile(const double* data, double p, size_t n);
 
+
     // --- Time-domain profile processing ---
 	void subtract_baseline(double *data, size_t n, size_t window_size);
 	void normalize_std(double *data, size_t n, size_t window_size);
 	void gaussian_kernel(double* x, size_t n, double fwhm);
 	void box_conv(double* x, double* out, size_t win, size_t n);
 
-	void ccf(double* x, double *y, size_t n1, size_t n2, double *res);
+
+	/**
+	 * Linear interpolation for sorted query points.
+	 *
+	 * This function assumes:
+	 *   - xp is strictly increasing (xp[i] < xp[i+1] for all i)
+	 *   - x  is non‑decreasing (x[i] <= x[i+1] for all i)
+	 *
+	 * @param x      Array of x‑coordinates where interpolation is evaluated (sorted).
+	 * @param y      Output array of interpolated values (size nx).
+	 * @param nx     Number of elements in x and y.
+	 * @param xp     Array of x‑coordinates of the data points (strictly increasing).
+	 * @param fp     Array of y‑coordinates of the data points, same length as xp.
+	 * @param n      Number of data points (length of xp and fp).
+	 * @param left   Value returned for x < xp[0].
+	 * @param right  Value returned for x > xp[n-1].
+	 */
+	void interp(
+			const double *x, double *y, size_t nx, 
+			const double *xp, const double *fp, size_t n,
+			double left = 0.0, double right = 0.0);
+
+	void shift(const double *in, double *out, size_t n, double shift);
+
+	void ccf(double* x, double *y, size_t n1, size_t n2, double *res, bool conj = false);
+	double max_continuous(double* x, size_t n, double *err = nullptr);
 
     // --- Freq-domain profile processing ---
 

@@ -9,17 +9,6 @@
 
 BaseHeader::~BaseHeader()
 {
-
-	if (t_subint) 
-	{
-		delete[] t_subint;
-		t_subint = nullptr;
-	}
-	if (freqs) 
-	{
-		delete[] freqs;
-		freqs = nullptr;
-	}
 }
 
 
@@ -57,6 +46,9 @@ void BaseHeader::print() const
         std::cout << std::setw(25) << "Temporal resolution:" << std::fixed << std::setprecision(3) 
                   << tau << " ms\n";
     }
+
+	if (npol > 0)
+        std::cout << std::setw(25) << "Polarization type:" << std::fixed << pol_type << std::endl;;
     
     // Frequency domain
     if (fmin > 0) {
@@ -88,31 +80,6 @@ void BaseHeader::print() const
         }
     } else {
         std::cout << std::setw(25) << "Folding:" << "Not folded (search mode)\n";
-    }
-    
-    // Subintegrations info
-    if (nsubint > 0 && t_subint) {
-        if (nsubint <= 5) {
-            for (size_t i = 0; i < nsubint; ++i) {
-                std::cout << std::setw(25) << ("Subint " + std::to_string(i) + ":") 
-                          << std::fixed << std::setprecision(1) << t_subint[i] << " ms\n";
-            }
-        } else {
-            double min_val = t_subint[0];
-            double max_val = t_subint[0];
-            double sum = 0;
-            for (size_t i = 0; i < nsubint; ++i) {
-                sum += t_subint[i];
-                if (t_subint[i] < min_val) min_val = t_subint[i];
-                if (t_subint[i] > max_val) max_val = t_subint[i];
-            }
-            std::cout << std::setw(25) << "Subint min duration:" << std::fixed << std::setprecision(1) 
-                      << min_val << " ms\n";
-            std::cout << std::setw(25) << "Subint avg duration:" << std::fixed << std::setprecision(1) 
-                      << (sum/nsubint) << " ms\n";
-            std::cout << std::setw(25) << "Subint max duration:" << std::fixed << std::setprecision(1) 
-                      << max_val << " ms\n";
-        }
     }
     
     std::cout << std::right; // Reset alignment
@@ -160,7 +127,7 @@ void BaseHeader:: update_header(std::string key, std::string value)
 		fmin = std::stod(value);
 
 		double df = (fmax - fmin) / double(nchann);
-		if (!freqs) freqs = new double[nchann];
+		if (freqs.size() == 0) freqs.resize(nchann);
 
 		for (size_t i = 0; i < nchann; ++i)
 			freqs[i] = fmin + df*(double(i) + .5);
@@ -170,7 +137,7 @@ void BaseHeader:: update_header(std::string key, std::string value)
 		fmax = std::stod(value);
 
 		double df = (fmax - fmin) / double(nchann);
-		if (!freqs) freqs = new double[nchann];
+		if (freqs.size() == 0) freqs.resize(nchann);
 
 		for (size_t i = 0; i < nchann; ++i)
 			freqs[i] = fmin + df*(double(i) + .5);

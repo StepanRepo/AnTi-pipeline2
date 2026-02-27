@@ -15,10 +15,11 @@
 void Profile::load_mask(size_t nchann)
 {
 	mask = new double[nchann];
+	fr = new double[nchann];
 
 	try 
 	{
-		reader->fill_wts(mask, nchann);
+		reader->fill_wts(mask, fr, nchann);
 	} 
 	catch(std::runtime_error &error)
 	{
@@ -79,6 +80,7 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 
 	while(true)
 	{
+		
 		filled = fill_2d(buff, nchann, buf_pos, buf_max, obs_window);
 
 		if (filled == 0) break; // EOF is reached
@@ -98,7 +100,7 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 			if (verbose > 0)
 			{
 				std::cout << "\r\033[K"; // move to the beginning of the line and clear the line
-				std::cout << "steps: " << counter << std::flush;
+				std::cout << "steps: " << counter <<  std::flush;
 			}
 		}
 
@@ -113,6 +115,7 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 
 	n = double(counter);
 	math::vec_copy(fr, M2, nchann);
+	math::vec_scale(fr, 1.0/n, nchann);
 	
 	math::vec_prod(M2, M2, nchann);
 	math::vec_div(M4, M2, nchann);
@@ -125,7 +128,13 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	// ===== Kurtosis calculation ===== 
 
 	if (counter == 0)
+	{
+		if (M2) {delete[] M2; M2 = nullptr;}
+		if (M4) {delete[] M4; M4 = nullptr;}
+		if (fr) {delete[] fr; fr = nullptr;}
+		if (mask) {delete[] mask; mask = nullptr;}
 		throw std::runtime_error("The file is empty");
+	}
 
 	// ===== Filtration section ===== 
 	 
@@ -150,7 +159,7 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	for (size_t i = 0; i < nchann; ++i)
 	{
 		if ((fr[i] > tail_reg) && (std::abs(M4[i]) < kurt_reg))
-			mask[i] = 1.0/fr[i];
+			mask[i] = 1.0;// /fr[i];
 		else
 			mask[i] = 0.0;
 	}
@@ -190,7 +199,7 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 		for (size_t i = 0; i < nchann; ++i)
 		{
 			if ((fr[i] > tail_reg) && res[i])
-				mask[i] = 1.0/fr[i];
+				mask[i] = 1.0;///fr[i];
 			else
 				mask[i] = 0.0;
 		}
@@ -198,11 +207,6 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 		delete[] res;
 	}
 	// ===== Checking section ===== 
-
-	
-	std::ofstream test(output_dir + "mask.bin");
-	test.write((char*) mask, sizeof(double)*nchann);
-	test.close();
 	
 
 
@@ -259,7 +263,9 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 
 
 
+	
 	// ===== Final section ===== 
+	/*
 	// Normilize mask according to the PSRFITS standard:
 	// mask \in [0, 1]
 	//
@@ -270,6 +276,15 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
 	for (size_t i = 0; i < nchann_in; ++i)
 		mask[i] = (mask[i] - min_val) / (max_val - min_val);
 
+	std::cout << max_val << "  " << min_val << std::endl;
+	*/
+
+	/*
+	std::ofstream test(output_dir + "mask.bin");
+	test.write((char*) mask, sizeof(double)*nchann);
+	test.close();
+	*/
+
 	// turn back to the initial position in the file
 	reader->reset();
 
@@ -277,15 +292,8 @@ void Profile::create_mask(size_t nchann_in, double sig_threshold, double tail_th
     delete[] M4;
 	// ===== Filtration section ===== 
 
-	PSRFITS_Writer writer(output_dir + "wts_" + reader->filename);
-	writer.createPrimaryHDU("SEARCH", hdr);
-	writer.append_subint_search(
-			nullptr, 
-			hdr->freqs, mask,
-			1, nchann, 1, 
-			0.0, 0.0, 0.0, "");
+	save_filt();
 
 	if (verbose > 0)
 		std::cout << "Mask created" << std::endl;
-
 }

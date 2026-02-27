@@ -12,7 +12,7 @@ CXX = g++
 # -g: Include debugging symbols (remove for release build)
 # -fopenmp: Enable to use OpenMP routines
 CXXFLAGS = -std=c++17 -fopenmp -O3 -march=native -ffast-math
-DEBUG = -g -Wall -Wextra #-fsanitize=address -fno-omit-frame-pointer #-fopt-info 
+DEBUG = -g -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer  #-fopt-info 
 
 CXXFLAGS += $(DEBUG)
 
@@ -35,17 +35,18 @@ SRCDIR = src
 INCDIR = include
 BUILDDIR = build
 
+
+# List all subdirectories containing source files
+
 # Find all source files (.cpp) in the src directory
-SOURCES = $(wildcard $(SRCDIR)/*.cpp)
-SOURCES += $(wildcard $(SRCDIR)/*.C)
+SOURCES = $(shell find $(SRCDIR) -name "*.cpp")
 
 # --- Object Files ---
 # Generate the list of object file names from source file names
 # The $(SOURCES:.cpp=.o) substitution replaces the .cpp extension with .o
 # First, get just the base names of the source files (e.g., main.cpp -> main)
 # Then, prefix each base name with the build directory path
-OBJ_NAMES = $(notdir $(SOURCES:.cpp=.o))
-OBJECTS = $(addprefix $(BUILDDIR)/obj/,$(OBJ_NAMES))
+OBJECTS = $(patsubst $(SRCDIR)/%.cpp,$(BUILDDIR)/obj/%.o,$(SOURCES))
 
 
 # --- Default Target ---
@@ -65,11 +66,11 @@ $(TARGET): $(OBJECTS)
 # $@ is the target (the .o file)
 # The $(CXXFLAGS) and $(INCLUDES) are used for compilation
 $(BUILDDIR)/obj/%.o: $(SRCDIR)/%.cpp
-	@mkdir -p $(BUILDDIR)/obj
+	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILDDIR)/obj/%.o: $(SRCDIR)/%.C
-	@mkdir -p $(BUILDDIR)/obj
+	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # --- Clean Target ---
@@ -88,25 +89,3 @@ check: $(TARGET)
          --show-leak-kinds=all \
          --track-origins=yes \
          ./$(TARGET)
-# --- Minimal self-contained PSRFITS writer library ---
-LIB_TARGET = libpsrfits_writer.so
-LIB_SOURCES = \
-	$(SRCDIR)/PSRFITS_Writer.cpp \
-	$(SRCDIR)/BaseHeader.cpp \
-	$(SRCDIR)/aux_math.cpp
-LIB_OBJECTS = $(LIB_SOURCES:$(SRCDIR)/%.cpp=$(BUILDDIR)/lib/%.o)
-
-.PHONY: libpsrfits clean-lib
-
-libpsrfits: $(LIB_TARGET)
-
-$(LIB_TARGET): $(LIB_OBJECTS)
-	@mkdir -p $(dir $@)
-	$(CXX) -fPIC $(CXXFLAGS) $(INCLUDES) -shared -Wl,--export-dynamic $(LIB_OBJECTS) -lcfitsio -o $@
-
-$(BUILDDIR)/lib/%.o: $(SRCDIR)/%.cpp
-	@mkdir -p $(dir $@)
-	$(CXX) -fPIC $(CXXFLAGS) $(INCLUDES) -c $< -o $@
-
-clean-lib:
-	rm -rf $(BUILDDIR)/lib $(LIB_TARGET)

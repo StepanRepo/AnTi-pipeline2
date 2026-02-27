@@ -2,13 +2,11 @@
 #include <cstddef>
 #include <cstring>
 #include <iostream>
-#include <iterator>
 #include <ostream>
 #include <string>
 #include <algorithm>
 #include <stdexcept>
 #include <fstream>
-#include <iomanip>
 #include <cstdlib>
 #include <filesystem>
 #include <yaml-cpp/yaml.h>
@@ -17,194 +15,12 @@
 
 #include "Profile.h"
 #include "aux_math.h"
+#include "config_utils.h"
 
 namespace fs = std::filesystem;
 
-//=============================================================================
-// PATH RESOLUTION UTILITIES
-//=============================================================================
 
-/**
- * Expands environment variables and '~' in paths, returns canonical path
- */
-std::string resolve_path(const std::string& input) 
-{
-	std::string til_result, result;
-	std::string::size_type pos = 0;
 
-	if (input.substr(0, 1) == "~")
-		til_result = "$HOME/" + input.substr(1, input.length());
-	else
-		til_result = input;
-
-	while (pos < til_result.length()) 
-	{
-		std::string::size_type dollar = til_result.find('$', pos);
-
-		if (dollar == std::string::npos) 
-		{
-			result += til_result.substr(pos);
-			break;
-		}
-
-		result += til_result.substr(pos, dollar - pos);
-		++dollar; // skip '$'
-
-		// Handle ${VAR} or $VAR
-		bool braced = (dollar < til_result.length() && til_result[dollar] == '{');
-		std::string::size_type start = dollar + (braced ? 1 : 0);
-		std::string::size_type end = start;
-
-		while (end < til_result.length() &&
-				((til_result[end] >= 'A' && til_result[end] <= 'Z') ||
-				 (til_result[end] >= '0' && til_result[end] <= '9') ||
-				 til_result[end] == '_')) 
-		{
-			++end;
-		}
-
-		std::string varName = til_result.substr(start, end - start);
-		const char* envValue = std::getenv(varName.c_str());
-
-		if (envValue) 
-		{
-			result += envValue;
-		} 
-		else 
-		{
-			result += '$' + (braced ? '{' + varName + '}' : varName);
-		}
-
-		pos = end + (braced && end < til_result.length() && til_result[end] == '}' ? 1 : 0);
-	}
-
-	try 
-	{
-		return std::filesystem::canonical(result).string() + "/";
-	} 
-	catch (const std::filesystem::filesystem_error& e) 
-	{
-		throw std::runtime_error("Invalid path after expansion: " + result);
-	}
-}
-
-//=============================================================================
-// FILE FORMAT DETECTION
-//=============================================================================
-
-/**
- * Determines file format based on extension
- */
-std::string get_format(const std::string& filename)
-{
-	if (filename.length() >= 3 && 
-			filename.substr(filename.length() - 3) == "adc") 
-	{
-		return "PRAO_adc";
-	}
-	if (filename.length() >= 5 && 
-			filename.substr(filename.length() - 5) == ".lpa3") 
-	{
-		return "PRAO_lpa3";
-	}
-	if (filename.length() >= 5 && 
-			filename.substr(filename.length() - 5) == ".vdif") 
-	{
-		return "IAA_vdif";
-	}
-	if (filename.length() >= 5 && 
-			filename.substr(filename.length() - 5) == ".fits") 
-	{
-		return "PSRFITS";
-	}
-	return "Unknown";
-}
-
-//=============================================================================
-// YAML CONFIGURATION READING
-//=============================================================================
-
-/**
- * Reads a key from YAML config with optional default value
- */
-	template<typename T>
-void read_key(const std::string& key, T* value, const YAML::Node& config, T* def = nullptr)
-{
-	if (config && config[key] && !config[key].IsNull())
-		*value = config[key].as<T>();
-	else if (def != nullptr)
-		*value = *def;
-	else
-		throw std::invalid_argument("Missing required key: " + key);
-}
-
-/**
- * Loads or generates a channel mask for RFI mitigation
- */
-void load_mask(Profile& profile, const YAML::Node& config)
-{
-	std::string mask_file = "";
-	double std_threshold, tail_threshold;
-	size_t nchann = 0;
-	size_t downsample = 0;
-	size_t max_len = 0;
-	bool filter = false;
-
-	read_key<std::string>("mask_file", &mask_file, config["options"], &mask_file);
-	read_key<size_t>("nchann", &nchann, config["options"]);
-	read_key<size_t>("max_len", &max_len, config["options"], &max_len);
-	read_key<size_t>("downsample", &downsample, config["options"], &downsample);
-	read_key<bool>("filter", &filter, config["options"], &filter);
-
-	if (!filter)
-		return;
-
-	if (mask_file == "" && filter)
-	{
-		read_key<double>("tail_threshold", &tail_threshold, config["options"]);
-		read_key<double>("std_threshold", &std_threshold, config["options"]);
-
-		if (downsample > 0)
-			profile.create_mask(nchann, std_threshold, tail_threshold, max_len, downsample);
-		else
-			profile.create_mask(nchann, std_threshold, tail_threshold, max_len);
-	}
-	else if (mask_file != "")
-	{
-		Profile wts_prf(mask_file, "PSRFITS", 0);
-		wts_prf.load_mask(nchann);
-
-		profile.mask = new double[nchann];
-		math::vec_copy(profile.mask, wts_prf.mask, nchann);
-	}
-}
-
-/**
- * Applies header corrections from advanced config section
- */
-void apply_header_corrections(BaseHeader* hdr, const YAML::Node& config)
-{
-	if (config["advanced"])
-	{
-		for (const auto& kv : config["advanced"]) 
-		{
-			const std::string key = kv.first.as<std::string>();
-			const std::string value = kv.second.as<std::string>();
-			hdr->update_header(key, value);
-		}
-	}
-}
-
-/**
- * Sets up time limits for data processing
- */
-void setup_time_limits(Profile& profile, double t0, double t1)
-{
-	if (t0 > 0.0)
-		profile.skip(t0);
-	if (t1 > 0.0)
-		profile.set_limit(t1);
-}
 
 //=============================================================================
 // PROCESSING MODES
@@ -237,21 +53,22 @@ void run_fold_mode(
 	std::string t2_pred_file = "";
 	std::string ddtype = "";
 
-	read_key<size_t>("nchann", &nchann, config["options"], &nchann);
-	read_key<std::string>("t2pred", &t2_pred_file, config["options"], &t2_pred_file);
-	read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
+	read_key("nchann", &nchann, config["options"], &nchann);
+	read_key("t2pred", &t2_pred_file, config["options"], &t2_pred_file);
+	read_key("ddtype", &ddtype, config["options"], &ddtype);
 
 	// Process each file
-	for (const auto& filename_yaml : config["files"]) 
+	for (const auto& filename_yaml : config["files"])
 	{
 		std::string filename = filename_yaml.as<std::string>();
 		std::string format = get_format(filename);
 
 		std::cout << "\nProcessing: " << filename << std::endl;
 
-		// Initialize profile
-		Profile profile(input_dir + filename, format, 
-				buf_size, save_raw, save_dyn, save_sum, output_dir, verbose);
+		// Build full input path using fs::path
+		fs::path in_path = fs::path(input_dir) / filename;
+		Profile profile(in_path.string(), format,
+				buf_size, output_dir, verbose);
 		BaseHeader* hdr = profile.getHeader();
 
 		// Apply configurations
@@ -261,11 +78,14 @@ void run_fold_mode(
 		if (verbose > 0)
 			hdr->print();
 
+		if (nchann == 0)
+			nchann = hdr->nchann;
+
 		// Get redshift correction if available
 		if (parfile != "")
 		{
-			std::string full_parfile = input_dir + parfile;
-			profile.get_redshift(full_parfile, site);
+			fs::path par_path = fs::path(input_dir) / parfile;
+			profile.get_redshift(par_path.string(), site);
 		}
 
 		// Load or generate RFI mask
@@ -275,8 +95,11 @@ void run_fold_mode(
 		if (ddtype == "incoherent")
 		{
 			if (t2_pred_file != "")
-				profile.fold_dyn(input_dir + t2_pred_file, nchann);
-			else 
+			{
+				fs::path t2_path = fs::path(input_dir) / t2_pred_file;
+				profile.fold_dyn(t2_path.string(), nchann);
+			}
+			else
 				profile.fold_dyn(hdr->period, nchann);
 
 			profile.dedisperse_incoherent(hdr->dm, nchann);
@@ -289,6 +112,10 @@ void run_fold_mode(
 		{
 			throw std::runtime_error("Unknown de-dispersion type: " + ddtype);
 		}
+
+		if (save_raw) profile.save_raw("PSR");
+		if (save_dyn) profile.save_dyn("PSR");
+		if (save_sum) profile.save_sum("PSR");
 	}
 }
 
@@ -308,7 +135,8 @@ void run_stream_mode(
 		const std::string& parfile,
 		double t0,
 		double t1,
-		int verbose)
+		int verbose,
+		std::string mode = "SEARCH")
 {
 	if (! (save_raw || save_dyn || save_sum))
 		return;
@@ -318,20 +146,21 @@ void run_stream_mode(
 	size_t nchann = 0;
 	std::string ddtype = "";
 
-	read_key<size_t>("nchann", &nchann, config["options"], &nchann);
-	read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
+	read_key("nchann", &nchann, config["options"], &nchann);
+	read_key("ddtype", &ddtype, config["options"], &ddtype);
 
 	// Process each file
-	for (const auto& filename_yaml : config["files"]) 
+	for (const auto& filename_yaml : config["files"])
 	{
 		std::string filename = filename_yaml.as<std::string>();
 		std::string format = get_format(filename);
 
 		std::cout << "\nProcessing: " << filename << std::endl;
 
-		// Initialize profile
-		Profile profile(input_dir + filename, format, 
-				buf_size, save_raw, save_dyn, save_sum, output_dir, verbose);
+		// Build full input path
+		fs::path in_path = fs::path(input_dir) / filename;
+		Profile profile(in_path.string(), format,
+				buf_size, output_dir, verbose);
 		BaseHeader* hdr = profile.getHeader();
 
 		// Apply configurations
@@ -341,32 +170,48 @@ void run_stream_mode(
 		if (verbose > 0)
 			hdr->print();
 
+
+		if (nchann == 0)
+			nchann = hdr->nchann;
+
 		// Get redshift correction if available
 		if (parfile != "")
 		{
-			std::string full_parfile = input_dir + parfile;
-			profile.get_redshift(full_parfile, site);
+			fs::path par_path = fs::path(input_dir) / parfile;
+			profile.get_redshift(par_path.string(), site);
 		}
 
 		// Load or generate RFI mask
 		load_mask(profile, config);
 
+		std::string id = "";
 		// Execute streaming de-dispersion
 		if (ddtype == "incoherent")
 		{
-			profile.dedisperse_incoherent_stream(hdr->dm, nchann);
+			id = profile.dedisperse_incoherent_stream(
+					hdr->dm, nchann,
+					save_raw, save_dyn, save_sum
+					);
 		}
 		else if (ddtype == "coherent")
 		{
-			profile.dedisperse_coherent_stream(hdr->dm, nchann);
+			id = profile.dedisperse_coherent_stream(
+					hdr->dm, nchann,
+					save_raw, save_dyn, save_sum
+					);
 		}
 		else
 		{
 			throw std::runtime_error("Unknown de-dispersion type: " + ddtype);
 		}
+
+		if (id == "") continue;
+
+		if (save_raw) profile.save_raw(mode, output_dir+"raw_" + id);
+		if (save_dyn) profile.save_dyn(mode, output_dir+"dyn_" + id);
+		if (save_sum) profile.save_sum(mode, output_dir+"sum_" + id);
 	}
 }
-
 
 /**
  * MODE: search
@@ -393,11 +238,13 @@ void trim_pulses(
     bool save_sum,
     const std::string& site,
     const std::string& parfile,
-    int verbose
+    int verbose,
+	std::string mode = "SEARCH"
 	)
 {
 	if (! (save_raw || save_dyn || save_sum))
 		return;
+
     //=========================================================================
     // READ PULSE CATALOG
     //=========================================================================
@@ -405,26 +252,26 @@ void trim_pulses(
     if (!catalog.is_open()) {
         throw std::runtime_error("Cannot open pulse catalog: " + pulse_csv);
     }
-    
+
     // Structure to hold pulse information with ID
     struct PulseInfo {
         std::string source_file;
         double time;
         int id;
     };
-    
+
     std::vector<PulseInfo> pulses;
     std::string line;
-    
+
     // Skip all comment lines
-    while (catalog.peek() == '#') 
+    while (catalog.peek() == '#')
     {
         std::getline(catalog, line);
     }
-    
+
     // Read header line to understand column order
     std::getline(catalog, line);
-    
+
     // Parse column headers to find time and ID columns
     std::stringstream header_ss(line);
     std::string header_token;
@@ -432,18 +279,18 @@ void trim_pulses(
     while (std::getline(header_ss, header_token, ';')) {
         headers.push_back(header_token);
     }
-    
+
     // Find indices of important columns
     int time_col = -1;
     int id_col = -1;
     int file_col = -1;  // Assume first column is filename
-    
+
     for (size_t i = 0; i < headers.size(); i++) {
-        if (headers[i] == "time_s" || headers[i] == "time" || headers[i] == "sec") 
+        if (headers[i] == "time_s" || headers[i] == "time" || headers[i] == "sec")
             time_col = i;
-        if (headers[i] == "pulse_id" || headers[i] == "id" || headers[i] == "ID") 
+        if (headers[i] == "pulse_id" || headers[i] == "id" || headers[i] == "ID")
             id_col = i;
-        if (headers[i] == "file" || headers[i] == "source") 
+        if (headers[i] == "file" || headers[i] == "source")
             file_col = i;
     }
 
@@ -451,41 +298,41 @@ void trim_pulses(
     if (time_col == -1) time_col = 3;  // Default to 4th column (0-indexed)
     if (id_col == -1)   id_col = 1;    // Default to 1st column
     if (file_col == -1) file_col = 0;  // Default to 0th column
-    
+
     // Parse pulses
-    while (std::getline(catalog, line)) 
+    while (std::getline(catalog, line))
     {
         if (line.empty()) continue;
-        
+
         std::stringstream ss(line);
         std::string token;
         std::vector<std::string> tokens;
-        
-        while (std::getline(ss, token, ';')) 
+
+        while (std::getline(ss, token, ';'))
         {
             tokens.push_back(token);
         }
-        
+
         if (tokens.size() < 6) {
             std::cerr << "Warning: Skipping line with insufficient fields: " << line << std::endl;
             continue;
         }
 
-        try 
+        try
         {
             PulseInfo pulse;
             pulse.source_file = tokens[file_col];  // First column is source file
             pulse.time = std::stod(tokens[time_col]);
             pulse.id = (size_t(id_col) < tokens.size()) ? std::stoi(tokens[id_col]) : pulses.size() + 1;
-            
+
             pulses.push_back(pulse);
-        } 
-        catch (const std::exception& e) 
+        }
+        catch (const std::exception& e)
         {
             std::cerr << "Warning: Failed to parse line: " << line << std::endl;
         }
     }
-    
+
     //=============================
     // GROUP PULSES BY SOURCE FILE
     //==============================
@@ -494,50 +341,52 @@ void trim_pulses(
     for (const auto& pulse : pulses) {
         file_pulses[pulse.source_file].push_back(std::make_pair(pulse.time, pulse.id));
     }
-    
+
     //=======================================
     // PROCESS EACH FILE AND TRIM AROUND PULSES
     //========================================
-    for (const auto& entry : file_pulses) 
+    for (const auto& entry : file_pulses)
     {
         const std::string& filename = entry.first;
         const auto& pulse_list = entry.second;
-        
-        // Get base filename without extension
-        fs::path file_path(input_dir+filename);
+
+        // Get base filename without extension (for display only)
+        fs::path file_path(filename);
         std::string base_name = file_path.stem().string();
         std::string format = get_format(filename);
-        
-        for (const auto& pulse_data : pulse_list) 
+
+        for (const auto& pulse_data : pulse_list)
         {
             double pulse_time = pulse_data.first;
             int pulse_id = pulse_data.second;
 
-            
+
             // Calculate window boundaries
             double window_start = pulse_time - window_width / 2.0;
             double window_end = pulse_time + window_width / 2.0;
 
             // Ensure non-negative start time
-            if (window_start < 0.0) 
+            if (window_start < 0.0)
             {
                 window_start = 0.0;
                 window_end = window_width;
             }
-            
-            
+
+
             //============================================
             // MODIFY CONFIGURATION FOR THIS PULSE
             //============================================
-            
+
             // Create a temporary config node for this pulse
             YAML::Node pulse_config = YAML::Clone(config);
-		
-			// If there is no mask file in the configuration	
+
+			// If there is no mask file in the configuration
 			if (! (config["options"]["mask_file"] &&
 						!config["options"]["mask_file"].IsNull()))
 			{
-				pulse_config["options"]["mask_file"] = output_dir + "wts_" + filename + ".fits";
+				// Build mask file path with fs::path
+				fs::path mask_path = fs::path(output_dir) / ("wts_" + filename + ".fits");
+				pulse_config["options"]["mask_file"] = mask_path.string();
 			}
 
             // Create a temporary config with just this file
@@ -545,7 +394,7 @@ void trim_pulses(
             temp_files.push_back(filename);
             pulse_config["files"] = temp_files;
 
-            
+
             //=====================================
             // RUN STREAM MODE ON THIS PULSE WINDOW
             //======================================
@@ -562,33 +411,39 @@ void trim_pulses(
                     parfile,
                     window_start,
                     window_end,
-                    verbose
+                    verbose,
+					mode
                 );
 
 				if (save_raw)
-					fs::rename(
-							output_dir+"raw_"+filename+".fits",
-							output_dir+"raw_"+filename+"_id"+std::to_string(pulse_id)+".fits");
+				{
+					fs::path old_raw = fs::path(output_dir) / ("raw_" + filename + ".fits");
+					fs::path new_raw = fs::path(output_dir) / ("raw_" + filename + "_id" + std::to_string(pulse_id) + ".fits");
+					fs::rename(old_raw, new_raw);
+				}
 
 				if (save_dyn)
-					fs::rename(
-							output_dir+"dyn_"+filename+".fits",
-							output_dir+"dyn_"+filename+"_id"+std::to_string(pulse_id)+".fits");
+				{
+					fs::path old_dyn = fs::path(output_dir) / ("dyn_" + filename + ".fits");
+					fs::path new_dyn = fs::path(output_dir) / ("dyn_" + filename + "_id" + std::to_string(pulse_id) + ".fits");
+					fs::rename(old_dyn, new_dyn);
+				}
 
 				if (save_sum)
-					fs::rename(
-							output_dir+"sum_"+filename+".fits",
-							output_dir+"sum_"+filename+"_id"+std::to_string(pulse_id)+".fits");
-                
-            } 
+				{
+					fs::path old_sum = fs::path(output_dir) / ("sum_" + filename + ".fits");
+					fs::path new_sum = fs::path(output_dir) / ("sum_" + filename + "_id" + std::to_string(pulse_id) + ".fits");
+					fs::rename(old_sum, new_sum);
+				}
+
+            }
 			catch (const std::exception& e) {
-                std::cerr << "  ERROR processing pulse ID " << pulse_id 
+                std::cerr << "  ERROR processing pulse ID " << pulse_id
                           << ": " << e.what() << std::endl;
             }
         }
     }
 }
-
 
 std::string collect_search_results(
 		const std::string& output_dir,
@@ -602,7 +457,7 @@ std::string collect_search_results(
 		const double threshold
 		)
 {
-    if (csv_files.empty()) 
+    if (csv_files.empty())
 	{
         std::cout << "No CSV files to collect." << std::endl;
         return "";
@@ -613,11 +468,11 @@ std::string collect_search_results(
     char timestamp[32];
     std::strftime(timestamp, sizeof(timestamp), "%Y.%m.%dT%H:%M:%S", std::localtime(&now_time));
 
-    std::string collection_file = output_dir + "search_results_" + timestamp + ".csv";
-    std::ofstream outfile(collection_file);
+    fs::path collection_path = fs::path(output_dir) / ("search_results_" + std::string(timestamp) + ".csv");
+    std::ofstream outfile(collection_path.string());
 
     if (!outfile.is_open()) {
-        throw std::runtime_error("Cannot create collection file: " + collection_file);
+        throw std::runtime_error("Cannot create collection file: " + collection_path.string());
     }
 
 
@@ -638,7 +493,7 @@ std::string collect_search_results(
     // Write column headers (take from first file)
     bool headers_written = false;
 
-    for (const auto& csv_file : csv_files) 
+    for (const auto& csv_file : csv_files)
 	{
         std::ifstream infile(csv_file);
 
@@ -649,19 +504,17 @@ std::string collect_search_results(
 
         std::string line;
 
-
-
 		size_t line_num = 0;
         // Write data rows with source filename
-        while (std::getline(infile, line)) 
+        while (std::getline(infile, line))
 		{
 			if (!line.empty() && line[0] == '#')  // Check first character
 				continue;  // Skip comment lines
-			
+
 			line_num += 1;
 
 
-			if (line_num == 1) 
+			if (line_num == 1)
 			{
 				if (!headers_written)
 				{
@@ -679,9 +532,8 @@ std::string collect_search_results(
     }
 
     outfile.close();
-	return collection_file;
+	return collection_path.string();
 }
-
 
 void run_search_mode(
 		const YAML::Node& config,
@@ -707,29 +559,31 @@ void run_search_mode(
 	std::string ddtype = "";
 	std::string conv_type = "";
 
-	read_key<size_t>("nchann", &nchann, config["options"], &nchann);
-	read_key<std::string>("ddtype", &ddtype, config["options"], &ddtype);
-	read_key<std::string>("conv_type", &conv_type, config["options"], &conv_type);
-	read_key<double>("bl_window", &bl_window, config["options"]);
-	read_key<double>("search_threshold", &threshold, config["options"]);
-	read_key<double>("search_fwhm", &fwhm, config["options"]);
+	read_key("nchann", &nchann, config["options"], &nchann);
+	read_key("ddtype", &ddtype, config["options"], &ddtype);
+	read_key("conv_type", &conv_type, config["options"], &conv_type);
+	read_key("bl_window", &bl_window, config["options"]);
+	read_key("search_threshold", &threshold, config["options"]);
+	read_key("search_fwhm", &fwhm, config["options"]);
 
 
     std::vector<std::string> search_results;
 
 	double dm = 0.0;
 	// Process each file
-	for (const auto& filename_yaml : config["files"]) 
+	for (const auto& filename_yaml : config["files"])
 	{
 		std::string filename = filename_yaml.as<std::string>();
 		std::string format = get_format(filename);
+		// Output CSV name: original filename + ".csv"
 		std::string new_filename = filename + ".csv";
 
 		std::cout << "\nProcessing: " << filename << std::endl;
 
-		// Initialize profile
-		Profile profile(input_dir + filename, format, 
-				buf_size, save_raw, save_dyn, save_sum, output_dir, verbose);
+		// Build full input path
+		fs::path in_path = fs::path(input_dir) / filename;
+		Profile profile(in_path.string(), format,
+				buf_size, output_dir, verbose);
 		BaseHeader* hdr = profile.getHeader();
 
 		// Apply configurations
@@ -739,11 +593,14 @@ void run_search_mode(
 		if (verbose > 0)
 			hdr->print();
 
+		if (nchann == 0)
+			nchann = hdr->nchann;
+
 		// Get redshift correction if available
 		if (parfile != "")
 		{
-			std::string full_parfile = input_dir + parfile;
-			profile.get_redshift(full_parfile, site);
+			fs::path par_path = fs::path(input_dir) / parfile;
+			profile.get_redshift(par_path.string(), site);
 		}
 
 		// Load or generate RFI mask
@@ -769,15 +626,17 @@ void run_search_mode(
 		// Rename output file
 		if (!temp_id.empty())
 		{
-			fs::rename(output_dir + temp_id, output_dir + new_filename);
-			search_results.push_back(output_dir + new_filename);
+			fs::path old_path = fs::path(output_dir) / temp_id;
+			fs::path new_path = fs::path(output_dir) / new_filename;
+			fs::rename(old_path, new_path);
+			search_results.push_back(new_path.string());
 		}
 		 dm = profile.hdr->dm;
 	}
 
 	std::string collection_file = collect_search_results(
-			output_dir, 
-			search_results, 
+			output_dir,
+			search_results,
 			dm,
 			nchann,
 			ddtype,
@@ -793,19 +652,205 @@ void run_search_mode(
 	if (! (save_raw || save_dyn || save_sum))
 		return;
 
+	double trim_window = -1.0;
+	read_key("trim_window", &trim_window, config["options"], &trim_window);
+
+	if (trim_window < 0.0)
+		return;
+
+
 	trim_pulses(
 			collection_file,
-			2.0,
-			config, 
-			input_dir, 
-			output_dir, 
+			trim_window,
+			config,
+			input_dir,
+			output_dir,
 			buf_size,
-			save_raw, 
-			save_dyn, 
-			save_sum, 
-			site, 
-			parfile, 
-			verbose);
+			save_raw,
+			save_dyn,
+			save_sum,
+			site,
+			parfile,
+			verbose,
+			"PSR");
+}
+
+
+
+/**
+ * MODE: template
+ * - Produses a template pulse from a series of files
+ */
+void run_template_mode(
+		const YAML::Node& config,
+		const std::string& input_dir,
+		const std::string& output_dir,
+		size_t buf_size,
+		bool save_raw,
+		bool save_dyn,
+		bool save_sum,
+		const std::string& site,
+		const std::string& parfile,
+		double t0,
+		double t1,
+		int verbose)
+{
+	std::cout << "\n=== TEMPLATE MODE ===\n";
+
+	if (config["files"].size() < 2)
+		throw std::runtime_error("Provide at least 2 files to average");
+
+	std::string t2_pred_file = "";
+	std::string ddtype = "";
+
+	read_key("t2pred", &t2_pred_file, config["options"], &t2_pred_file);
+	read_key("ddtype", &ddtype, config["options"], &ddtype);
+
+
+	const auto filename_yaml = config["files"][0];
+	std::string filename = filename_yaml.as<std::string>();
+	std::string format = get_format(filename);
+
+	if (verbose > 0)
+		std::cout << "\nReferance file: " << filename << std::endl;
+
+	// Build full input path
+	fs::path in_path = fs::path(input_dir) / filename;
+	Profile ref_prf(in_path.string(), format,
+			buf_size, output_dir, verbose);
+	BaseHeader* hdr = ref_prf.getHeader();
+
+	// Apply configurations
+	apply_header_corrections(hdr, config);
+	setup_time_limits(ref_prf, t0, t1);
+
+
+	// Get redshift correction if available
+	if (parfile != "")
+	{
+		fs::path par_path = fs::path(input_dir) / parfile;
+		ref_prf.get_redshift(par_path.string(), site);
+	}
+
+	// Load or generate RFI mask
+	load_mask(ref_prf, config);
+
+	if (verbose > 0)
+		hdr->print();
+
+	bool dd = ! (hdr->dds_mthd == "" || hdr->dds_mthd == "none");
+	bool avg = (hdr->nchann == 1);
+
+	if (hdr->MODE == "SEARCH")
+	{
+		ref_prf.fill_SEARCH();
+
+		if (dd && avg)
+		{
+			ref_prf.sum = ref_prf.raw;
+			ref_prf.raw = nullptr;
+		}
+		if (dd && !avg)
+		{
+			ref_prf.dyn = ref_prf.raw;
+			ref_prf.raw = nullptr;
+		}
+		if (!dd && !avg)
+		{
+			ref_prf.raw = ref_prf.raw;
+		}
+	}
+
+	if (dd && !avg)
+		ref_prf.dedisperse_incoherent(0.0, hdr->nchann);
+	if (!dd && !avg)
+		ref_prf.dedisperse_incoherent(hdr->dm, hdr->nchann);
+
+
+	// Process each file
+	for (size_t i = 1; i < config["files"].size(); ++i)
+	{
+
+		// Build full input path
+		const auto filename_yaml = config["files"][i];
+		std::string filename = filename_yaml.as<std::string>();
+		fs::path in_path = fs::path(input_dir) / filename;
+
+
+		Profile profile(in_path.string(), format,
+				buf_size, output_dir, verbose);
+		BaseHeader* hdr = profile.getHeader();
+
+		// Apply configurations
+		apply_header_corrections(hdr, config);
+		setup_time_limits(profile, t0, t1);
+
+		if (verbose > 0)
+			hdr->print();
+
+
+		// Get redshift correction if available
+		if (parfile != "")
+		{
+			fs::path par_path = fs::path(input_dir) / parfile;
+			profile.get_redshift(par_path.string(), site);
+		}
+
+		// Load or generate RFI mask
+		load_mask(profile, config);
+
+		bool dd = ! (hdr->dds_mthd == "" || hdr->dds_mthd == "none");
+		bool avg = (hdr->nchann == 1);
+
+		if (hdr->MODE == "SEARCH")
+		{
+			profile.fill_SEARCH();
+
+			if (dd && avg)
+			{
+				profile.sum = profile.raw;
+				profile.raw = nullptr;
+			}
+			if (dd && !avg)
+			{
+				profile.dyn = profile.raw;
+				profile.raw = nullptr;
+			}
+			if (!dd && !avg)
+			{
+				profile.raw = profile.raw;
+			}
+		}
+
+		if (dd && !avg && t2_pred_file != "")
+			profile.dedisperse_incoherent(0.0, hdr->nchann);
+		if (!dd && !avg  && t2_pred_file != "")
+			profile.dedisperse_incoherent(hdr->dm, hdr->nchann);
+
+
+		// Execute ccf-based accumulation
+		if (hdr->MODE == "SEARCH")
+		{
+			ref_prf.fill_SEARCH();
+
+			if (ref_prf.hdr->dds_mthd == "")
+				ref_prf.dedisperse_incoherent(ref_prf.hdr->dm, ref_prf.hdr->nchann);
+		}
+
+		ref_prf.accumulate_prf(profile, input_dir + t2_pred_file);
+	}
+	
+	ref_prf.finish_accumulation();
+
+	std::string file_orig = ref_prf.reader->filename;
+	ref_prf.reader->filename = "tpl_" + file_orig;
+
+	if (ref_prf.raw and save_raw) ref_prf.save_raw("PSR");
+	if (ref_prf.dyn and save_dyn) ref_prf.save_dyn("PSR");
+	if (ref_prf.sum and save_sum) ref_prf.save_sum("PSR");
+
+	ref_prf.reader->filename = file_orig;
+	
 }
 
 //=============================================================================
@@ -814,9 +859,9 @@ void run_search_mode(
 
 YAML::Node config;
 
-int main() 
+int main()
 {
-	try 
+	try
 	{
 		//=========================================================================
 		// LOAD CONFIGURATION
@@ -848,24 +893,24 @@ int main()
 		bool save_sum = false;
 
 		// Read general configuration values
-		read_key<std::string>("mode", &mode, config["general"]);
+		read_key("mode", &mode, config["general"]);
 
 		std::string def_path = ".";
-		read_key<std::string>("input_dir", &input_dir, config["general"], &def_path);
-		read_key<std::string>("output_dir", &output_dir, config["general"], &def_path);
-		read_key<std::string>("site", &site, config["general"]);
-		read_key<int>("verbose", &verbose, config["general"], &verbose);
-		read_key<double>("buf_size", &buf_size, config["general"], &buf_size);
-		read_key<double>("t0", &t0, config["general"], &t0);
-		read_key<double>("t1", &t1, config["general"], &t1);
-		read_key<std::string>("parfile", &parfile, config["general"], &parfile);
-		read_key<bool>("save_raw", &save_raw, config["general"], &save_raw);
-		read_key<bool>("save_dyn", &save_dyn, config["general"], &save_dyn);
-		read_key<bool>("save_sum", &save_sum, config["general"], &save_sum);
+		read_key("input_dir", &input_dir, config["general"], &def_path);
+		read_key("output_dir", &output_dir, config["general"], &def_path);
+		read_key("site", &site, config["general"]);
+		read_key("verbose", &verbose, config["general"], &verbose);
+		read_key("buf_size", &buf_size, config["general"], &buf_size);
+		read_key("t0", &t0, config["general"], &t0);
+		read_key("t1", &t1, config["general"], &t1);
+		read_key("parfile", &parfile, config["general"], &parfile);
+		read_key("save_raw", &save_raw, config["general"], &save_raw);
+		read_key("save_dyn", &save_dyn, config["general"], &save_dyn);
+		read_key("save_sum", &save_sum, config["general"], &save_sum);
 
-		// Resolve paths
-		input_dir = resolve_path(input_dir + "/");
-		output_dir = resolve_path(output_dir + "/");
+		// Resolve paths (ensure trailing separator using fs::path)
+		input_dir = resolve_path((fs::path(input_dir) / "").string());
+		output_dir = resolve_path((fs::path(output_dir) / "").string());
 
 		//=========================================================================
 		// NORMALIZE MODE STRING
@@ -878,7 +923,7 @@ int main()
 		// DISPLAY CONFIGURATION
 		//=========================================================================
 		std::cout << "========================================\n";
-		std::cout << "ANTI-PIPELINE 2\n";
+		std::cout << "            ANTI-PIPELINE 2\n";
 		std::cout << "========================================\n";
 		std::cout << "Mode:             " << mode << "\n";
 		std::cout << "Input directory:  " << input_dir << "\n";
@@ -907,6 +952,11 @@ int main()
 			run_search_mode(config, input_dir, output_dir, buf_size_bytes,
 					save_raw, save_dyn, save_sum, site, parfile, t0, t1, verbose);
 		}
+		else if (mode == "template")
+		{
+			run_template_mode(config, input_dir, output_dir, buf_size_bytes,
+					save_raw, save_dyn, save_sum, site, parfile, t0, t1, verbose);
+		}
 		else
 		{
 			throw std::runtime_error("Unknown processing mode: " + mode);
@@ -919,7 +969,7 @@ int main()
 		std::cout << "\nProcessing completed successfully.\n";
 		return 0;
 	}
-	catch (const YAML::Exception& e) 
+	catch (const YAML::Exception& e)
 	{
 		std::cerr << "\nYAML ERROR: " << e.what() << "\n";
 		return 1;

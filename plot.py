@@ -101,8 +101,13 @@ def read_search(hdul):
     npol    = header['NPOL']
     signint = header['SIGNINT']        # Is the data stored as signed ints 
     tau     = header['TBIN']
-    cmplx   = not (header['CMPLX'] == 0)
-    c = 2**cmplx
+
+    try:
+        cmplx   = not (header['CMPLX'] == 0)
+        c = 2**cmplx
+    except KeyError:
+        cmplx = False
+        c = 1
 
 
 
@@ -238,15 +243,21 @@ if __name__ == "__main__":
     path = Path("rup103")
     path = Path("data")
 
-    files = np.sort(list(path.glob("*id*.fits")))
+    files = np.sort(list(path.glob("*.fits")))
 
     for filename in files:
         filename = Path(filename)
+
+        if (filename.stem[:3] == "wts"): continue
+
         print(f"Processing {filename.stem}")
 
 
         data_2d, freqs, tl = read(filename)
         data_2d = data_2d.T
+
+        if (np.any(np.isnan(data_2d))):
+            print("THERE IS NAN IN THE DATA")
 
         if(data_2d.shape[0] == 1):
             binning = 2**0
@@ -264,15 +275,15 @@ if __name__ == "__main__":
 
         if (data_2d.shape[0] > 1):
 
-            data_2d[data_2d == 0.0] = np.median(data_2d[data_2d > 0])
+            #data_2d[data_2d == 0.0] = np.median(data_2d[data_2d > 0])
 
 
             nchan = data_2d.shape[0]
             fr = np.sum(data_2d, axis = 1)
 
             fig, ax = plt.subplots(2, 2, 
-                                   width_ratios = [2, 1],
-                                   height_ratios = [2, 1],
+                                   #width_ratios = [2, 1],
+                                   #height_ratios = [2, 1],
                                    )
 
             fig.suptitle(filename.stem)
@@ -301,8 +312,8 @@ if __name__ == "__main__":
                             aspect = "auto",
                             cmap = "Greys",
                             extent = extent,
-                            #vmin = lower * (1 + .2),
-                            #vmax = upper * (1 - .2),
+                            vmin = lower * (1 + .0),
+                            vmax = upper * (1 - .0),
                             interpolation = "none",
                             )
             ax[1, 0].plot(tl.to(u.ms), np.nanmean(data_2d, axis = 0))

@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+#include "tempo2pred.h"  // API for TEMPO2 prediction files
+#include "tempo2.h"
 
 #include "BaseReader.h"
 #include "BaseHeader.h"
@@ -28,6 +30,9 @@ class Profile
 		void calc_shift_int(int *shift, double DM, double fcomp, double *freqs, size_t nchann, double tau, double beta = 0.0);
 
 
+	T2Predictor *pred;
+	pulsar *psr;
+
 	public:
 		BaseReader* reader;
 		BaseHeader* hdr;
@@ -41,7 +46,6 @@ class Profile
 		double redshift;
 		size_t sumidx;
 
-		bool save_raw, save_dyn, save_sum;
 		std::string output_dir;
 		int verbose;
 
@@ -49,9 +53,6 @@ class Profile
 		Profile(const std::string& filename, 
 				const std::string& format, 
 				size_t buffer_size = 1024 * 1024 * 1024, // Standard size: 1 GiB
-				bool save_raw_in = false, 
-				bool save_dyn_in = false, 
-				bool save_sum_in = false,
 				std::string output_dir = ".",
 				int verbose = 0
 				);
@@ -61,18 +62,37 @@ class Profile
 		Profile& operator=(const Profile&) = delete;
 		~Profile();
 
-		// Forward fill functions
+		// Helper functions
+		void fill_PSR();
+		void fill_SEARCH();
 		size_t fill_2d(double *dyn_spec, size_t& nchann, size_t& buf_pos, size_t& buf_max, size_t& buf_size);
 		size_t fill_1d(double *vec, size_t& buf_pos, size_t& buf_max, size_t& buf_size);
 		void skip(const double t);
 		void set_limit(const double t);
 
-		void dedisperse_incoherent (double DM, size_t nchann);
-		void dedisperse_coherent (double DM, size_t nchann);
+		void load_predictor(std::string filename);
+		void load_psr(std::string filename, std::string site);
 
-		std::string dedisperse_incoherent_stream (double DM, size_t nchann);
-		std::string dedisperse_coherent_stream (double DM, size_t nchann);
+		double get_redshift (std::string par_path, std::string site);
+		void normilize(double BL_window = -1.0);
 
+		void save_raw(std::string mode, std::string stream_file = "");
+		void save_dyn(std::string mode, std::string stream_file = "");
+		void save_sum(std::string mode, std::string stream_file = "");
+		void save_filt();
+
+		// Functions for streaming profile processing
+		std::string dedisperse_incoherent_stream (
+				double DM, size_t nchann, 
+				bool is_save_raw = false, bool is_save_dyn = false, bool is_save_sum = false
+				);
+		std::string dedisperse_coherent_stream (
+				double DM, size_t nchann,
+				bool is_save_raw = false, bool is_save_dyn = false, bool is_save_sum = false
+				);
+
+
+		// Functions for time-domain single-pulse search
 		std::string dedisperse_incoherent_search (
 				double DM, 
 				size_t nchann, 
@@ -88,13 +108,27 @@ class Profile
 				std::string conv_type = "", 
 				double fwhm = 0.0);
 
+
+		// Functions for timing purposes
+		void accumulate_prf(Profile& other, std::string t2_pred_file = "");
+		void finish_accumulation();
+
+
+		void get_toa (const Profile& tpl, long double *toa, double *toa_err);
+
+
+		// Functions for channel filtration
 		void load_mask(size_t nchann);
 		void create_mask(size_t nchann, double sig_threshold, double tail_threshold, size_t max_len = 0, size_t downsample = 0);
 
+
+		// Functions for profile folding
 		void fold_dyn(double P, size_t nchann);
 		void fold_dyn(std::string pred_file, size_t nchann);
 
-		double get_redshift (std::string par_path, std::string site);
+		void dedisperse_incoherent (double DM, size_t nchann);
+		void dedisperse_coherent (double DM, size_t nchann);
+
 
 		// Access header info
 		BaseHeader* getHeader();

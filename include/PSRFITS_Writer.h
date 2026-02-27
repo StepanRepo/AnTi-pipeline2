@@ -16,6 +16,16 @@ extern "C" {
  */
 class PSRFITS_Writer 
 {
+
+	private:
+		fitsfile* fptr; // CFITSIO file pointer
+		int status;     // CFITSIO status code
+
+		BaseHeader hdr = {};
+
+		void check_status(std::string operation);
+
+
 	public:
 		/**
 		 * @brief Constructor.
@@ -34,6 +44,11 @@ class PSRFITS_Writer
 		 * @return True if successful.
 		 */
 		bool createPrimaryHDU(std::string obs_mode, const BaseHeader* header);
+		bool append_subint(double *data_double, double *mask);
+		bool append_subint(std::string stream_file, double *mask);
+		bool append_history(std::string dds_mtd = "", double* mask = nullptr);
+		bool append_bandpass(double *fr);
+
 		bool append_history(
 				const size_t nsubint, 
 				const size_t nbin, 
@@ -87,14 +102,6 @@ class PSRFITS_Writer
 				const double tau, 
 				std::string dds_mtd = "",
 				bool cmp = false);
-
-	private:
-		fitsfile* fptr; // CFITSIO file pointer
-		int status;     // CFITSIO status code
-
-
-		void check_status(std::string operation);
-
 
 };
 

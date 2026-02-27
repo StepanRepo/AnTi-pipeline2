@@ -2,7 +2,9 @@
 #include "fftw3.h"
 #include "aux_math.h"
 
+#include <cctype>
 #include <cstddef>
+#include <ctime>
 #include <iostream>
 #include <cstring>
 #include <stdexcept>
@@ -14,6 +16,11 @@ BaseReader::~BaseReader()
 	// But if we define custom header in an 
 	// inherited class as an object, it is 
 	// deleted automatically
+    if (buffer != nullptr) 
+	{
+        delete[] buffer;
+        buffer = nullptr;
+    }
 }
 
 // Common implementation of the resetting function
@@ -227,7 +234,6 @@ size_t BaseReader::fill_2d_spectrum(double* dyn_spec, size_t time_steps, size_t 
 		buf_pos += to_fill * samples_per_chunk;
 	}
 
-
 	return filled;
 }
 
@@ -239,7 +245,7 @@ size_t BaseReader::fill_2d_spectrum(double* dyn_spec, size_t time_steps, size_t 
 size_t BaseReader::fill_2d(double* dyn_spec, size_t time_steps, size_t freq_num) 
 {
 
-	if (header_ptr->nchann == 1 && !(header_ptr->cmplx))
+	if (header_ptr->nchann == 1 && !(header_ptr->cmplx) && header_ptr->MODE == "SEARCH")
 	{
 		return fill_2d_baseband_re(dyn_spec, time_steps, freq_num);
 	}
@@ -247,7 +253,7 @@ size_t BaseReader::fill_2d(double* dyn_spec, size_t time_steps, size_t freq_num)
 	{
 		return fill_2d_baseband_cmplx(dyn_spec, time_steps, freq_num);
 	}
-	else if (header_ptr->nchann > 1) 
+	else if (header_ptr->nchann > 1 || header_ptr->MODE == "PSR") 
 	{
 		return fill_2d_spectrum(dyn_spec, time_steps, freq_num);
 	}
@@ -294,7 +300,15 @@ size_t BaseReader::fill_1d(double *vec, size_t n)
 	return i;
 }
 
-bool BaseReader::fill_wts(double* mask, size_t freq_num)
+bool BaseReader::check_fit()
+{
+	size_t to_load = std::min(header_ptr->OBS_SIZE, header_ptr->CUT_SIZE);
+	to_load *= header_ptr->nchann * header_ptr->npol;
+
+	return (buf_size >= to_load);
+}
+
+bool BaseReader::fill_wts(double*, double*, size_t)
 {
 	throw std::runtime_error("This format doesn't support channels' weights storage");
 	return 0;

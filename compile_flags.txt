@@ -1,0 +1,6 @@
+-Iinclude/
+-I/home/Andrianov/tempo2/include
+-I/home/gpps/pulsar_software/include 
+-I./libs/
+-x 
+c++

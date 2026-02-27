@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <iostream>
 #include <iomanip>
+#include <stdexcept>
 
 
 void Profile::matched_filter(double* data, size_t N, double threshold, std::vector<size_t>& pos, std::vector<double>& power)
@@ -135,7 +136,7 @@ std::string Profile::dedisperse_coherent_search(
 
 
 	dphase  = (fftw_complex*)(fftw_malloc(sizeof(fftw_complex) * (nchann)));
-	calc_shift_phase(dphase, DM, fcomp, hdr->freqs, nchann, redshift);
+	calc_shift_phase(dphase, DM, fcomp, hdr->freqs.data(), nchann, redshift);
 
 
 	// Modify phase shift with sensitivity 
@@ -288,18 +289,19 @@ std::string Profile::dedisperse_coherent_search(
 			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], i) << '\n';
 
 
-		if (save_raw && is_pulse) 
+		/*
+		if (is_save_raw && is_pulse) 
 		{
 			PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename + "_" + std::to_string(n_found));
 			writer1.createPrimaryHDU("SEARCH", hdr);
 			writer1.append_subint_search(
 					buff + buf_pos, 
-					hdr->freqs, nullptr,
+					hdr->freqs.data(), nullptr,
 					2*N, 1, 1, 
 					0.0, fcomp, tau/2.0, "");
 		}
 
-		if (save_dyn && is_pulse) 
+		if (is_save_dyn && is_pulse) 
 		{
 			PSRFITS_Writer writer1(output_dir + "dyn_" + reader->filename + "_" + std::to_string(n_found));
 			writer1.createPrimaryHDU("SEARCH", hdr);
@@ -310,7 +312,7 @@ std::string Profile::dedisperse_coherent_search(
 					DM, fcomp, tau, "coherent", true);
 		}
 
-		if (save_sum && is_pulse) 
+		if (is_save_sum && is_pulse) 
 		{
 
 			PSRFITS_Writer writer0(output_dir + "conv_" + reader->filename + "_" + std::to_string(n_found));
@@ -329,6 +331,7 @@ std::string Profile::dedisperse_coherent_search(
 					N, 1, 1, 
 					DM, fcomp, tau, "coherent");
 		}
+		*/
 
 		buf_pos = buf_max - 2*n_DM;
 		sumidx += N;
@@ -428,6 +431,7 @@ std::string Profile::dedisperse_incoherent_search(
 	sum = new double[obs_window - n_DM];
 
 	conv = new double[obs_window - n_DM + ker_len - 1];
+
 	// Set up the convolution kernel
 	if(conv_type == "gaussian")
 	{
@@ -437,11 +441,11 @@ std::string Profile::dedisperse_incoherent_search(
 		math::gaussian_kernel(ker_t, ker_len, fwhm*1e3/tau);
 	}
 	else {
-		throw ;
+		throw std::runtime_error("Unsupported type of convolution kernel: " + conv_type);
 	}
 
 
-	calc_shift_int(shift, DM, fcomp, hdr->freqs, nchann, tau, redshift);
+	calc_shift_int(shift, DM, fcomp, hdr->freqs.data(), nchann, tau, redshift);
 	
 
 
@@ -483,8 +487,17 @@ std::string Profile::dedisperse_incoherent_search(
 			std::fill(pre + buf_max*nchann, pre + obs_window*nchann, 0.0);
 		}
 
+		if (buf_max <= n_DM) continue;
 		N = buf_max - n_DM;
-		if (N == 0) continue;
+
+		if (fr)
+		{
+			for (size_t i = buf_pos; i < buf_max; ++i)
+			{
+				math::vec_sub(pre + i*nchann, fr, nchann);
+				math::vec_div(pre + i*nchann, fr, nchann);
+			}
+		}
 
 		shift_window_incoherent(pre, post, shift, nchann, obs_window, mask);
 
@@ -495,14 +508,14 @@ std::string Profile::dedisperse_incoherent_search(
 		if(conv_type == "gaussian")
 			math::ccf(sum, ker_t, N, ker_len, conv);
 		else
-			throw;
-
+			throw std::runtime_error("Unsupported type of convolution kernel: " + conv_type);
 
 		// Find pulses with overlapping windows
 		math::subtract_baseline(conv + zeroth_lag, N, BL_window);
 		math::normalize_std(conv + zeroth_lag, N, BL_window);
 		matched_filter(conv + zeroth_lag, N, threshold, pulses_dm1, power_dm1);
 		
+		/*
 		// Debug output
 		if (n_found == 0)
 		{
@@ -519,6 +532,7 @@ std::string Profile::dedisperse_incoherent_search(
 			test1.write((char*) (sum), N*sizeof(double));
 			test1.close();
 		}
+		*/
 		
 
 		// Save profiles of the search
@@ -535,53 +549,8 @@ std::string Profile::dedisperse_incoherent_search(
 			csv << csv_result(pulses_dm1[2*i], pulses_dm1[2*i+1], power_dm1[i], i) << '\n';
 
 
-		/*
-		if (save_raw && is_pulse) 
-		{
-			PSRFITS_Writer writer1(output_dir + "raw_" + reader->filename + "_" + std::to_string(n_found));
-			writer1.createPrimaryHDU("SEARCH", hdr);
-			writer1.append_subint_search(
-					pre, 
-					hdr->freqs, nullptr,
-					N, nchann, 1, 
-					0.0, fcomp, tau, "");
-		}
-
-		if (save_dyn && is_pulse) 
-		{
-			PSRFITS_Writer writer1(output_dir + "dyn_" + reader->filename + "_" + std::to_string(n_found));
-			writer1.createPrimaryHDU("SEARCH", hdr);
-			writer1.append_subint_search(
-					(double*) post, 
-					new double((fmin+fmax)/2.0), nullptr,
-					N, nchann, 1, 
-					DM, fcomp, tau, "coherent", true);
-		}
-
-		if (save_sum && is_pulse) 
-		{
-
-			PSRFITS_Writer writer0(output_dir + "conv_" + reader->filename + "_" + std::to_string(n_found));
-			writer0.createPrimaryHDU("SEARCH", hdr);
-			writer0.append_subint_search(
-					conv + ker_len-1, 
-					new double((fmin+fmax)/2.0), nullptr,
-					N, 1, 1, 
-					DM, fcomp, tau, "coherent");
-
-			PSRFITS_Writer writer1(output_dir + "sum_" + reader->filename + "_" + std::to_string(n_found));
-			writer1.createPrimaryHDU("SEARCH", hdr);
-			writer1.append_subint_search(
-					sum, 
-					new double((fmin+fmax)/2.0), nullptr,
-					N, 1, 1, 
-					DM, fcomp, tau, "coherent");
-		}
-		*/
-
 		buf_pos = buf_max - n_DM;
 		sumidx += N;
-
 
 
 		if (verbose > 0)
